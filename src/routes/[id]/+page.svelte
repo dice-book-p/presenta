@@ -6,12 +6,30 @@
 
   const projectId = $derived($page.params.id);
 
+  const SS_PIN_KEY = 'presenta_pin_verified';
+
   let project = $state(null);
   let loading = $state(true);
   let step = $state('pin'); // 'pin' | 'roles'
   let pinInput = $state('');
   let pinError = $state('');
   let notFound = $state(false);
+
+  /** PIN 인증된 프로젝트 ID 목록을 sessionStorage에서 관리 */
+  function isPinVerified(id) {
+    try {
+      const list = JSON.parse(sessionStorage.getItem(SS_PIN_KEY) || '[]');
+      return list.includes(id);
+    } catch { return false; }
+  }
+
+  function markPinVerified(id) {
+    try {
+      const list = JSON.parse(sessionStorage.getItem(SS_PIN_KEY) || '[]');
+      if (!list.includes(id)) list.push(id);
+      sessionStorage.setItem(SS_PIN_KEY, JSON.stringify(list));
+    } catch {}
+  }
 
   onMount(async () => {
     try {
@@ -23,7 +41,8 @@
       }
     } catch {}
 
-    if (project && !project.hasPin) {
+    // PIN이 없거나, 이미 인증된 프로젝트면 바로 역할 선택
+    if (project && (!project.hasPin || isPinVerified(projectId))) {
       step = 'roles';
     }
     loading = false;
@@ -38,6 +57,7 @@
         body: JSON.stringify({ pin: pinInput }),
       });
       if (res.ok) {
+        markPinVerified(projectId);
         step = 'roles';
       } else {
         pinError = 'PIN이 올바르지 않습니다';
@@ -48,11 +68,7 @@
   }
 
   function goBack() {
-    if (step === 'roles' && project?.hasPin) {
-      step = 'pin';
-    } else {
-      goto('/');
-    }
+    goto('/');
   }
 </script>
 
