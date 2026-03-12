@@ -1072,9 +1072,13 @@
         {/if}
       </div>
 
-      <!-- Flash messages -->
-      {#if msg}<div class="flash flash-ok">{msg}</div>{/if}
-      {#if err}<div class="flash flash-err">{err}</div>{/if}
+      <!-- Flash messages (fixed overlay) -->
+      {#if msg || err}
+        <div class="flash-container">
+          {#if msg}<div class="flash flash-ok">{msg}</div>{/if}
+          {#if err}<div class="flash flash-err">{err}</div>{/if}
+        </div>
+      {/if}
 
       <!-- Project tab bar (moved from sidebar) -->
       {#if selectedProject}
@@ -1944,10 +1948,30 @@
 
   .content { flex: 1; padding: 28px; overflow-y: auto; color: #e8e0d0; }
 
-  /* ── Flash ── */
-  .flash { padding: 10px 16px; border-radius: 8px; font-size: 13px; margin: 0 28px 4px; }
-  .flash-ok { background: rgba(76,175,80,.1); border: 1px solid rgba(76,175,80,.25); color: #80c883; }
-  .flash-err { background: rgba(200,60,60,.1); border: 1px solid rgba(200,60,60,.25); color: #e07070; }
+  /* ── Flash (fixed overlay) ── */
+  .flash-container {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+  }
+  .flash {
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 13px;
+    pointer-events: auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    animation: flashIn 0.25s ease-out;
+    white-space: nowrap;
+  }
+  @keyframes flashIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  .flash-ok { background: rgba(20, 30, 20, 0.95); border: 1px solid rgba(76,175,80,.35); color: #80c883; }
+  .flash-err { background: rgba(30, 20, 20, 0.95); border: 1px solid rgba(200,60,60,.35); color: #e07070; }
 
   /* ── Content sections ── */
   .content-section { display: flex; flex-direction: column; gap: 16px; max-width: 820px; }
