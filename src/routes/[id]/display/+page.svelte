@@ -242,17 +242,7 @@
   let slideNumTimer = null;
 
   const SS_SLIDE = 'display_slide';
-
-  // 새로고침 감지: Navigation API로 직접 판별
-  function isPageReload() {
-    try {
-      const nav = performance.getEntriesByType('navigation')[0];
-      return nav?.type === 'reload';
-    } catch {
-      return false;
-    }
-  }
-  const wasReload = typeof window !== 'undefined' && isPageReload();
+  const SS_FRESH = 'display_fresh_entry';
 
   function showBoundaryToast(msg) {
     boundaryToast = msg;
@@ -385,17 +375,21 @@
         ctxMap = {};  // reset ctx cache on project load
         applySlideshowSettings(msg.project);
         const saved = sessionStorage.getItem(SS_SLIDE);
+        // 역할선택 페이지에서 진입 시 플래그가 설정됨 → 새 진입
+        // 새로고침 시에는 플래그 없음 → 조용히 복원
+        const isFreshEntry = sessionStorage.getItem(SS_FRESH) === 'true';
+        sessionStorage.removeItem(SS_FRESH); // 소비
 
         if (saved !== null) {
           const idx = parseInt(saved, 10);
           if (!isNaN(idx) && idx > 0 && idx < msg.project.slides.length) {
-            if (wasReload) {
-              // 새로고침 → 조용히 복원
-              currentSlide = idx;
-            } else {
+            if (isFreshEntry) {
               // 새로 진입 → 물어보기
               savedSlideIdx = idx;
               showResumePrompt = true;
+            } else {
+              // 새로고침 → 조용히 복원
+              currentSlide = idx;
             }
           }
         }

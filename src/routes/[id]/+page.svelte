@@ -115,7 +115,7 @@
       <!-- 역할 선택 -->
       {:else if step === 'roles'}
         <div class="buttons">
-          <button class="role-btn primary" onclick={() => goto(`/${projectId}/display`)}>
+          <button class="role-btn primary" onclick={() => { sessionStorage.setItem('display_fresh_entry', 'true'); goto(`/${projectId}/display`); }}>
             <span class="btn-icon">🖥</span>
             <span class="btn-label">슬라이드쇼</span>
             <span class="btn-desc">PC / 메인 화면용</span>
