@@ -236,6 +236,8 @@
   let showControls = $state(false);     // 컨트롤 바 표시
   let controlsTimer = null;
   let showExitConfirm = $state(false); // 나가기 확인 다이얼로그
+  let showResumePrompt = $state(false); // 이어보기 확인
+  let savedSlideIdx = $state(-1);       // 저장된 슬라이드 인덱스
   let slideNumBuffer = $state('');     // 숫자 입력 버퍼 (숫자+Enter 이동)
   let slideNumTimer = null;
 
@@ -371,17 +373,20 @@
         noProject = false;
         ctxMap = {};  // reset ctx cache on project load
         applySlideshowSettings(msg.project);
-        // 저장된 슬라이드 인덱스 복원
+        // 저장된 슬라이드 인덱스 확인 → 1페이지가 아니면 물어보기
         const saved = sessionStorage.getItem(SS_SLIDE);
         if (saved !== null) {
           const idx = parseInt(saved, 10);
-          if (!isNaN(idx) && idx < msg.project.slides.length) {
-            currentSlide = idx;
+          if (!isNaN(idx) && idx > 0 && idx < msg.project.slides.length) {
+            savedSlideIdx = idx;
+            showResumePrompt = true;
+            // 일단 1페이지로 시작, 사용자가 선택하면 이동
           }
         }
-        await tick(); // wait for canvas elements to bind
+        sessionStorage.removeItem(SS_SLIDE);
+        await tick();
         restoreSignatures();
-        if (autoPlay) startAutoPlay();
+        if (autoPlay && !showResumePrompt) startAutoPlay();
       }
     }));
 
@@ -527,6 +532,22 @@
         ></canvas>
       {/each}
     </div>
+
+    <!-- 이어보기 확인 다이얼로그 -->
+    {#if showResumePrompt}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="exit-overlay" onclick={() => { showResumePrompt = false; if (autoPlay) startAutoPlay(); }}>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="exit-dialog" onclick={(e) => e.stopPropagation()}>
+          <h3>이전 진행 위치가 있습니다</h3>
+          <p>{savedSlideIdx + 1}번 슬라이드부터 이어서 보시겠습니까?</p>
+          <div class="exit-actions">
+            <button class="exit-btn cancel" onclick={() => { showResumePrompt = false; if (autoPlay) startAutoPlay(); }}>처음부터</button>
+            <button class="exit-btn confirm-gold" onclick={() => { goToSlide(savedSlideIdx); showResumePrompt = false; if (autoPlay) startAutoPlay(); }}>이어보기</button>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- 나가기 확인 다이얼로그 -->
     {#if showExitConfirm}
@@ -876,6 +897,17 @@
   .exit-btn.confirm:hover {
     background: rgba(200, 60, 60, 0.25);
     border-color: #e07070;
+  }
+
+  .exit-btn.confirm-gold {
+    background: rgba(201, 168, 76, 0.15);
+    border: 1.5px solid rgba(201, 168, 76, 0.5);
+    color: #c9a84c;
+  }
+
+  .exit-btn.confirm-gold:hover {
+    background: rgba(201, 168, 76, 0.25);
+    border-color: #c9a84c;
   }
 
   .back-link {
