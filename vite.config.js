@@ -12,6 +12,11 @@ export default defineConfig({
 				target: `http://localhost:${WS_PORT}`,
 				changeOrigin: true
 			},
+			// 로컬 이미지 서빙 프록시
+			'/uploads': {
+				target: `http://localhost:${WS_PORT}`,
+				changeOrigin: true
+			},
 			// WebSocket 프록시
 			'/ws': {
 				target: `http://localhost:${WS_PORT}`,

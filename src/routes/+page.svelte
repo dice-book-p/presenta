@@ -4,6 +4,7 @@
   import { API_BASE } from '$lib/config.js';
 
   // 단계: 'projects' → 'pin' → 'roles'
+  const SS_KEY = 'presenta_main_state';
   let step = $state('projects');
   let projects = $state([]);
   let loading = $state(true);
@@ -11,11 +12,33 @@
   let pinInput = $state('');
   let pinError = $state('');
 
+  function saveState() {
+    if (selectedProject && step !== 'projects') {
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ step, projectId: selectedProject.id }));
+    } else {
+      sessionStorage.removeItem(SS_KEY);
+    }
+  }
+
   onMount(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/active`);
       if (res.ok) projects = await res.json();
     } catch {}
+
+    // 세션 복원
+    try {
+      const saved = sessionStorage.getItem(SS_KEY);
+      if (saved && projects.length) {
+        const { step: savedStep, projectId } = JSON.parse(saved);
+        const proj = projects.find(p => p.id === projectId);
+        if (proj && (savedStep === 'pin' || savedStep === 'roles')) {
+          selectedProject = proj;
+          step = savedStep;
+        }
+      }
+    } catch {}
+
     loading = false;
   });
 
@@ -28,6 +51,7 @@
     } else {
       step = 'roles';
     }
+    saveState();
   }
 
   async function verifyPin() {
@@ -40,6 +64,7 @@
       });
       if (res.ok) {
         step = 'roles';
+        saveState();
       } else {
         pinError = 'PIN이 올바르지 않습니다';
       }
@@ -55,6 +80,7 @@
       step = 'projects';
       selectedProject = null;
     }
+    saveState();
   }
 </script>
 

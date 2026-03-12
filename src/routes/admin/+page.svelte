@@ -768,6 +768,37 @@
     editPinLoaded = true;
   }
 
+  // ── Slideshow settings ──────────────────────────────────────────────────
+  async function saveSlideshowSettings(slideshow) {
+    if (!selectedProject) return;
+    const pid = selectedProject.id;
+    try {
+      const r = await apiPut(`/api/projects/${pid}`, { slideshow });
+      if (r.ok) {
+        selectedProject = { ...selectedProject, slideshow };
+        flash('슬라이드쇼 설정이 저장되었습니다.');
+      } else flash('', '설정 저장 실패');
+    } catch { flash('', '설정 저장 중 오류 발생'); }
+  }
+
+  function toggleSlideshowLoop() {
+    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
+    ss.loop = !ss.loop;
+    saveSlideshowSettings(ss);
+  }
+
+  function toggleSlideshowAutoPlay() {
+    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
+    ss.autoPlay = !ss.autoPlay;
+    saveSlideshowSettings(ss);
+  }
+
+  function setSlideshowInterval(delta) {
+    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
+    ss.autoPlaySec = Math.max(1, Math.min(60, (ss.autoPlaySec ?? 5) + delta));
+    saveSlideshowSettings(ss);
+  }
+
   async function saveProjectPin() {
     if (!selectedProject) return;
     const pid = selectedProject.id;
@@ -1513,6 +1544,52 @@
             </div>
 
             <div class="form-card">
+              <div class="form-section-label">슬라이드쇼 모드</div>
+              <p class="helper-text" style="margin-top:-8px">
+                슬라이드쇼(디스플레이) 화면에서 적용되는 재생 설정입니다.
+              </p>
+
+              <div class="slideshow-options">
+                <label class="toggle-row">
+                  <span class="toggle-label">
+                    <strong>반복 모드</strong>
+                    <span class="toggle-desc">마지막 슬라이드에서 첫 슬라이드로 순환합니다</span>
+                  </span>
+                  <button class="toggle-switch" class:on={selectedProject?.slideshow?.loop}
+                    onclick={toggleSlideshowLoop}>
+                    <span class="toggle-knob"></span>
+                  </button>
+                </label>
+
+                <label class="toggle-row">
+                  <span class="toggle-label">
+                    <strong>자동 넘김</strong>
+                    <span class="toggle-desc">설정된 간격으로 슬라이드를 자동 전환합니다</span>
+                  </span>
+                  <button class="toggle-switch" class:on={selectedProject?.slideshow?.autoPlay}
+                    onclick={toggleSlideshowAutoPlay}>
+                    <span class="toggle-knob"></span>
+                  </button>
+                </label>
+
+                {#if selectedProject?.slideshow?.autoPlay}
+                  <div class="interval-setting">
+                    <span class="interval-label">자동 넘김 간격</span>
+                    <div class="interval-control">
+                      <button class="interval-btn" onclick={() => setSlideshowInterval(-1)}>-</button>
+                      <span class="interval-value">{selectedProject?.slideshow?.autoPlaySec ?? 5}초</span>
+                      <button class="interval-btn" onclick={() => setSlideshowInterval(1)}>+</button>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+
+              <p class="helper-text" style="margin-top:12px;font-size:11px">
+                단축키: Space/화살표 = 넘기기, F = 전체화면, L = 반복 토글, A = 자동 토글
+              </p>
+            </div>
+
+            <div class="form-card">
               <div class="form-section-label">프로젝트 관리</div>
               <div class="form-footer">
                 <button class="btn-outline btn-sm" disabled={loading} onclick={() => duplicateProject(selectedProject.id)}>프로젝트 복제</button>
@@ -1897,4 +1974,31 @@
   .modal-desc { font-size: 14px; color: rgba(232,224,208,.6); margin: 0; }
   .modal-input { font-size: 16px; padding: 14px 16px; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* ── Slideshow settings ── */
+  .slideshow-options { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 12px 16px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px; cursor: pointer; }
+  .toggle-label { display: flex; flex-direction: column; gap: 2px; }
+  .toggle-label strong { font-size: 14px; color: #f0e8d8; font-weight: 600; }
+  .toggle-desc { font-size: 12px; color: rgba(232,224,208,.45); }
+  .toggle-switch { width: 44px; height: 24px; border-radius: 12px; border: none; padding: 2px;
+    background: rgba(255,255,255,.1); cursor: pointer; position: relative; transition: background .2s;
+    flex-shrink: 0; }
+  .toggle-switch.on { background: rgba(201,168,76,.5); }
+  .toggle-knob { display: block; width: 20px; height: 20px; border-radius: 50%; background: #e8e0d0;
+    transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .toggle-switch.on .toggle-knob { transform: translateX(20px); }
+  .interval-setting { display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; background: rgba(201,168,76,.05); border: 1px solid rgba(201,168,76,.15);
+    border-radius: 10px; }
+  .interval-label { font-size: 13px; color: rgba(232,224,208,.7); }
+  .interval-control { display: flex; align-items: center; gap: 8px; }
+  .interval-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.06); color: rgba(232,224,208,.7); font-size: 16px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit;
+    transition: all .15s; }
+  .interval-btn:hover { border-color: rgba(201,168,76,.4); color: #c9a84c; }
+  .interval-value { font-size: 15px; font-weight: 700; color: #c9a84c; min-width: 36px; text-align: center; }
 </style>

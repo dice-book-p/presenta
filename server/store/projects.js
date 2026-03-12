@@ -33,6 +33,18 @@ export async function initProjectsStore() {
         }
       }
     }
+    // Migration: 절대 URL → 상대경로 변환 (localhost:PORT/uploads/... → /uploads/...)
+    let migrated = false;
+    for (const p of store.projects) {
+      if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5 }; migrated = true; }
+      for (const s of (p.slides ?? [])) {
+        if (s.url && /^https?:\/\/[^/]+\/uploads\//.test(s.url)) {
+          s.url = s.url.replace(/^https?:\/\/[^/]+/, '');
+          migrated = true;
+        }
+      }
+    }
+    if (migrated) persist();
   } catch (e) {
     console.error('[projects] init error:', e.message);
   }
@@ -116,6 +128,7 @@ export function createProject(name) {
     signatories: [],
     pin: '',
     remoteToken: '',
+    slideshow: { loop: false, autoPlay: false, autoPlaySec: 5 },
   };
   store.projects.push(project);
   persist();
@@ -125,7 +138,7 @@ export function createProject(name) {
 export function updateProject(id, updates) {
   const project = getProject(id);
   if (!project) return null;
-  for (const key of ['name', 'summarySlideId', 'signatories', 'slides', 'pin']) {
+  for (const key of ['name', 'summarySlideId', 'signatories', 'slides', 'pin', 'slideshow']) {
     if (key in updates) project[key] = updates[key];
   }
   persist();

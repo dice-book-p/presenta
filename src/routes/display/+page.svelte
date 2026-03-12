@@ -149,16 +149,82 @@
     } catch {}
   }
 
-  // ── Navigation ────────────────────────────────────────────────────────────
+  // ── Slideshow modes ──────────────────────────────────────────────────────
+  let loopMode = $state(false);        // 반복 모드
+  let autoPlay = $state(false);        // 자동 넘김
+  let autoPlayInterval = $state(5);    // 자동 넘김 간격 (초)
+  let autoPlayTimer = null;
+  let boundaryToast = $state('');       // 경계 안내 메시지
+  let boundaryToastTimer = null;
+  let showControls = $state(false);     // 컨트롤 바 표시
+  let controlsTimer = null;
+
   const SS_SLIDE = 'display_slide';
+
+  function showBoundaryToast(msg) {
+    boundaryToast = msg;
+    clearTimeout(boundaryToastTimer);
+    boundaryToastTimer = setTimeout(() => { boundaryToast = ''; }, 2000);
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────
 
   function goToSlide(idx) {
     if (!sortedSlides.length) return;
-    const newIdx = Math.max(0, Math.min(sortedSlides.length - 1, idx));
-    if (newIdx === currentSlide) return;
-    currentSlide = newIdx;
-    sessionStorage.setItem(SS_SLIDE, String(newIdx));
-    wsStore.send({ type: 'slide_change', slideIndex: sortedSlides[newIdx].order });
+    const len = sortedSlides.length;
+
+    if (loopMode) {
+      // 반복 모드: 순환
+      if (idx >= len) idx = 0;
+      else if (idx < 0) idx = len - 1;
+    } else {
+      // 비반복 모드: 경계 안내
+      if (idx >= len) {
+        showBoundaryToast('마지막 슬라이드입니다');
+        return;
+      }
+      if (idx < 0) {
+        showBoundaryToast('첫 번째 슬라이드입니다');
+        return;
+      }
+    }
+
+    if (idx === currentSlide) return;
+    currentSlide = idx;
+    sessionStorage.setItem(SS_SLIDE, String(idx));
+    wsStore.send({ type: 'slide_change', slideIndex: sortedSlides[idx].order });
+  }
+
+  function toggleLoop() {
+    loopMode = !loopMode;
+  }
+
+  function toggleAutoPlay() {
+    autoPlay = !autoPlay;
+    if (autoPlay) startAutoPlay();
+    else stopAutoPlay();
+  }
+
+  function setAutoPlayInterval(sec) {
+    autoPlayInterval = sec;
+    if (autoPlay) { stopAutoPlay(); startAutoPlay(); }
+  }
+
+  function startAutoPlay() {
+    stopAutoPlay();
+    autoPlayTimer = setInterval(() => {
+      goToSlide(currentSlide + 1);
+    }, autoPlayInterval * 1000);
+  }
+
+  function stopAutoPlay() {
+    if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+  }
+
+  function showControlsTemporarily() {
+    showControls = true;
+    clearTimeout(controlsTimer);
+    controlsTimer = setTimeout(() => { showControls = false; }, 3000);
   }
 
   function handleKeyDown(e) {
@@ -168,10 +234,22 @@
       e.preventDefault(); goToSlide(currentSlide - 1);
     } else if (e.key === 'f' || e.key === 'F') {
       document.documentElement.requestFullscreen?.();
+    } else if (e.key === 'l' || e.key === 'L') {
+      toggleLoop();
+    } else if (e.key === 'a' || e.key === 'A') {
+      toggleAutoPlay();
     }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+  function applySlideshowSettings(proj) {
+    const ss = proj?.slideshow;
+    if (!ss) return;
+    loopMode = !!ss.loop;
+    autoPlay = !!ss.autoPlay;
+    autoPlayInterval = Math.max(1, ss.autoPlaySec ?? 5);
+  }
+
   onMount(() => {
     window.addEventListener('keydown', handleKeyDown);
     wsStore.connect();
@@ -184,6 +262,7 @@
         project = msg.project;
         noProject = false;
         ctxMap = {};  // reset ctx cache on project load
+        applySlideshowSettings(msg.project);
         // 저장된 슬라이드 인덱스 복원
         const saved = sessionStorage.getItem(SS_SLIDE);
         if (saved !== null) {
@@ -194,6 +273,7 @@
         }
         await tick(); // wait for canvas elements to bind
         restoreSignatures();
+        if (autoPlay) startAutoPlay();
       }
     }));
 
@@ -241,6 +321,9 @@
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       clearInterval(identifyInterval);
+      stopAutoPlay();
+      clearTimeout(boundaryToastTimer);
+      clearTimeout(controlsTimer);
       unsubs.forEach(fn => fn());
       wsStore.disconnect();
     };
@@ -292,7 +375,8 @@
 
 <!-- 슬라이드쇼 -->
 {:else}
-  <div class="fullscreen slideshow">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="fullscreen slideshow" onmousemove={showControlsTemporarily}>
     <div class="slide-wrapper">
       <!-- 현재 슬라이드 이미지 -->
       {#if currentSlideObj}
@@ -318,9 +402,16 @@
       {/each}
     </div>
 
+    <!-- 경계 안내 토스트 -->
+    {#if boundaryToast}
+      <div class="boundary-toast">{boundaryToast}</div>
+    {/if}
+
     <!-- 슬라이드 카운터 -->
     <div class="slide-counter">
       {currentSlide + 1} / {sortedSlides.length}
+      {#if loopMode}<span class="mode-badge">반복</span>{/if}
+      {#if autoPlay}<span class="mode-badge">자동 {autoPlayInterval}초</span>{/if}
     </div>
 
     <!-- 이전/다음 버튼 -->
@@ -334,6 +425,49 @@
       onclick={() => goToSlide(currentSlide + 1)}
       aria-label="다음 슬라이드"
     >›</button>
+
+    <!-- 컨트롤 바 (마우스 움직이면 표시, 3초 후 숨김) -->
+    <div class="control-bar" class:visible={showControls}>
+      <!-- 반복 모드 -->
+      <button class="ctrl-btn" class:active={loopMode} onclick={toggleLoop} title="반복 모드 (L)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+          <path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+        <span>반복</span>
+      </button>
+
+      <!-- 자동 넘김 -->
+      <button class="ctrl-btn" class:active={autoPlay} onclick={toggleAutoPlay} title="자동 넘김 (A)">
+        {#if autoPlay}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16" rx="1"/>
+            <rect x="14" y="4" width="4" height="16" rx="1"/>
+          </svg>
+        {:else}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5,3 19,12 5,21"/>
+          </svg>
+        {/if}
+        <span>자동</span>
+      </button>
+
+      <!-- 자동 넘김 간격 -->
+      {#if autoPlay}
+        <div class="interval-ctrl">
+          <button class="interval-btn" onclick={() => setAutoPlayInterval(Math.max(1, autoPlayInterval - 1))}>-</button>
+          <span class="interval-val">{autoPlayInterval}초</span>
+          <button class="interval-btn" onclick={() => setAutoPlayInterval(Math.min(60, autoPlayInterval + 1))}>+</button>
+        </div>
+      {/if}
+
+      <div class="ctrl-divider"></div>
+
+      <!-- 단축키 안내 -->
+      <div class="ctrl-hint">
+        Space/Arrow: 넘김 | F: 전체화면 | L: 반복 | A: 자동
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -495,5 +629,144 @@
   .gold-btn:hover {
     background: rgba(201, 168, 76, 0.25);
     border-color: #c9a84c;
+  }
+
+  /* ── Boundary toast ── */
+  .boundary-toast {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 10, 15, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(201, 168, 76, 0.3);
+    border-radius: 12px;
+    padding: 14px 28px;
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(232, 224, 208, 0.8);
+    z-index: 20;
+    pointer-events: none;
+    animation: toast-fade 2s ease-in-out;
+  }
+
+  @keyframes toast-fade {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+    15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    75% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* ── Mode badges in counter ── */
+  .mode-badge {
+    margin-left: 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #c9a84c;
+    background: rgba(201, 168, 76, 0.15);
+    border: 1px solid rgba(201, 168, 76, 0.3);
+    border-radius: 4px;
+    padding: 1px 6px;
+    vertical-align: middle;
+  }
+
+  /* ── Control bar ── */
+  .control-bar {
+    position: absolute;
+    bottom: 48px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(10, 10, 15, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 8px 16px;
+    z-index: 15;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    white-space: nowrap;
+  }
+
+  .control-bar.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .ctrl-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(232, 224, 208, 0.5);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .ctrl-btn:hover {
+    border-color: rgba(201, 168, 76, 0.4);
+    color: rgba(232, 224, 208, 0.8);
+  }
+
+  .ctrl-btn.active {
+    background: rgba(201, 168, 76, 0.15);
+    border-color: rgba(201, 168, 76, 0.5);
+    color: #c9a84c;
+  }
+
+  .interval-ctrl {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .interval-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(232, 224, 208, 0.6);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+
+  .interval-btn:hover {
+    border-color: rgba(201, 168, 76, 0.4);
+    color: #c9a84c;
+  }
+
+  .interval-val {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c9a84c;
+    min-width: 28px;
+    text-align: center;
+  }
+
+  .ctrl-divider {
+    width: 1px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 0 4px;
+  }
+
+  .ctrl-hint {
+    font-size: 11px;
+    color: rgba(232, 224, 208, 0.3);
   }
 </style>

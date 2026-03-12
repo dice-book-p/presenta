@@ -8,8 +8,8 @@
  *   data/  ← projects.json, signatures.json
  *   uploads/{projectId}/  ← 슬라이드 이미지
  *
- * 이미지 URL: http://localhost:{PORT}/uploads/{projectId}/{filename}
- * (ws-dev.js가 /uploads 경로를 정적 파일로 서빙)
+ * 이미지 URL: /uploads/{projectId}/{filename} (상대경로)
+ * (ws-dev.js / index.js가 /uploads 경로를 정적 파일로 서빙)
  */
 import { readFile, writeFile, mkdir, unlink, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -21,8 +21,7 @@ const ROOT       = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DATA_DIR   = join(ROOT, 'data');
 const UPLOAD_DIR = join(ROOT, 'uploads');
 
-const DEV_PORT   = process.env.PORT ?? '8765';
-const DEV_HOST   = process.env.LOCAL_HOST ?? `http://localhost:${DEV_PORT}`;
+// URL은 상대경로로 저장 → 어느 환경에서든 동작
 
 async function ensureDir(dir) {
   await mkdir(dir, { recursive: true });
@@ -40,7 +39,7 @@ export async function uploadSlideImage(projectId, originalFilename, buffer, cont
   await ensureDir(dir);
   await writeFile(join(dir, filename), buffer);
 
-  const url = `${DEV_HOST}/uploads/${projectId}/${filename}`;
+  const url = `/uploads/${projectId}/${filename}`;
   return { filename, url };
 }
 
