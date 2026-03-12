@@ -3,10 +3,15 @@
   import { goto } from '$app/navigation';
   import { API_BASE } from '$lib/config.js';
 
+  const SS_PIN_KEY = 'presenta_pin_verified';
+
   let projects = $state([]);
   let loading = $state(true);
 
   onMount(async () => {
+    // 루트로 돌아오면 PIN 인증 전부 초기화
+    sessionStorage.removeItem(SS_PIN_KEY);
+
     try {
       const res = await fetch(`${API_BASE}/api/active`);
       if (res.ok) projects = await res.json();
