@@ -210,6 +210,9 @@ const ROUTES = [
   ['DELETE', '/api/projects/:id/signatures',         true,  clearSignaturesHandler],
   ['DELETE', '/api/projects/:id/signatures/:signId', true,  clearOneSignatureHandler],
 
+  // Auth ping (PIN 검증용)
+  ['GET',    '/api/me',                              true,  ({ res }) => json(res, 200, { ok: true })],
+
   // Connections / admin
   ['GET',    '/api/status',                          false, getStatusHandler],
   ['POST',   '/api/disconnect',                      true,  disconnectHandler],

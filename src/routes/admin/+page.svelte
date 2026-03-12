@@ -10,7 +10,7 @@
 
   function submitPin() {
     token = pinInput;
-    fetch(`${API_BASE}/api/projects`, { headers: authHeaders() }).then(r => {
+    fetch(`${API_BASE}/api/me`, { headers: authHeaders() }).then(r => {
       if (r.status === 401) { pinError = 'PIN이 올바르지 않습니다.'; pinInput = ''; token = ''; }
       else { pinView = false; loadAll(); startConnPoll(); }
     }).catch(() => { pinError = '서버에 연결할 수 없습니다.'; token = ''; });
