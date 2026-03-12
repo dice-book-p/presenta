@@ -1,28 +1,44 @@
 /**
  * WebSocket 서버 (인프라 레이어)
  *
- * - 클라이언트 식별(identify_display / identify_tablet)
+ * - 클라이언트 식별 (identify_display / identify_tablet / identify_remote)
  * - 그리기 이벤트, 서명 완료/초기화 중계
  * - 주기적 Heartbeat (ping/pong)
  */
 import { WebSocketServer } from 'ws';
-import { getActiveProject } from '../store/projects.js';
-import { WS_HEARTBEAT_MS, REMOTE_TOKEN } from '../config.js';
+import { getProject, isProjectActive, getActiveProjects } from '../store/projects.js';
+import { WS_HEARTBEAT_MS } from '../config.js';
 import {
-  registerDisplay, registerTablet,
-  unregisterDisplay, unregisterTablet,
-  handleSlideChange, sendToDisplay,
-  broadcastConnectionStatus, getConnectionStatus, getPool,
-  registerRemote, unregisterRemote, sendToRemotes, getCurrentSlideOrder,
+  registerMainDisplay,
+  registerSubDisplay,
+  registerTablet,
+  registerRemote,
+  unregisterConnection,
+  handleSlideChange,
+  sendToMain,
+  broadcastConnectionStatus,
+  getConnectionStatus,
+  getCurrentSlideOrder,
+  broadcastToDisplays,
+  sendToRemotes,
 } from './connections.js';
 
 export function createWebSocketServer(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws) => {
-    ws.isAlive = true;
-    ws.role    = null;
-    ws.signId  = null;
+  wss.on('connection', (ws, req) => {
+    // Extract request-level device info
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+               ?? req.socket?.remoteAddress ?? 'unknown';
+    const userAgent = req.headers['user-agent'] ?? 'unknown';
+    ws._ip = ip;
+    ws._userAgent = userAgent;
+
+    ws.isAlive  = true;
+    ws.role     = null;
+    ws.projectId = null;
+    ws.signId   = null;
+    ws.connId   = null;
 
     ws.on('pong', () => { ws.isAlive = true; });
 
@@ -32,122 +48,212 @@ export function createWebSocketServer(server) {
 
       switch (msg.type) {
 
+        // ── 메인 디스플레이 식별 ──────────────────────────────────────────────
         case 'identify_display': {
-          const project = getActiveProject();
+          const { projectId, pin, role = 'main', deviceInfo: clientDeviceInfo = {} } = msg;
+
+          if (!projectId) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'missing_project_id' }));
+            return;
+          }
+
+          const project = getProject(projectId);
           if (!project) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'no_active_project' }));
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'project_not_found' }));
             return;
           }
-          const result = registerDisplay(ws);
-          if (!result.success) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: result.reason }));
+
+          if (!isProjectActive(projectId)) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'project_not_active' }));
             return;
           }
-          ws.role = 'display';
+
+          // Pin validation: empty pin means no pin required
+          if (project.pin && project.pin !== pin) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_pin' }));
+            return;
+          }
+
+          const deviceInfo = {
+            ip: ws._ip,
+            userAgent: ws._userAgent,
+            screen: clientDeviceInfo.screen ?? null,
+            ...clientDeviceInfo,
+          };
+
+          let result;
+          if (role === 'sub') {
+            result = registerSubDisplay(projectId, ws, deviceInfo);
+            if (!result.success) {
+              ws.send(JSON.stringify({ type: 'rejected', reason: result.reason }));
+              return;
+            }
+            ws.role      = 'sub';
+            ws.projectId = projectId;
+            ws.connId    = result.connId;
+          } else {
+            result = registerMainDisplay(projectId, ws, deviceInfo);
+            if (!result.success) {
+              ws.send(JSON.stringify({ type: 'rejected', reason: result.reason }));
+              return;
+            }
+            ws.role      = 'main';
+            ws.projectId = projectId;
+            ws.connId    = result.connId;
+          }
+
           ws.send(JSON.stringify({
             type: 'identified',
-            role: 'display',
+            role: ws.role,
+            connId: ws.connId,
             project,
-            connectionStatus: getConnectionStatus(),
+            connectionStatus: getConnectionStatus(projectId),
           }));
           break;
         }
 
+        // ── 태블릿 식별 ───────────────────────────────────────────────────────
         case 'identify_tablet': {
-          const { signId } = msg;
-          if (!signId) return;
-          const project = getActiveProject();
-          if (!project) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'no_active_project' }));
+          const { projectId, pin, signId, deviceInfo: clientDeviceInfo = {} } = msg;
+
+          if (!projectId || !signId) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'missing_fields' }));
             return;
           }
+
+          const project = getProject(projectId);
+          if (!project) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'project_not_found' }));
+            return;
+          }
+
+          if (!isProjectActive(projectId)) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'project_not_active' }));
+            return;
+          }
+
+          // Pin validation
+          if (project.pin && project.pin !== pin) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_pin' }));
+            return;
+          }
+
           const signatory = project.signatories.find(s => s.id === signId);
           if (!signatory) {
             ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_signatory' }));
             return;
           }
-          const result = registerTablet(ws, signId);
+
+          const deviceInfo = {
+            ip: ws._ip,
+            userAgent: ws._userAgent,
+            screen: clientDeviceInfo.screen ?? null,
+            ...clientDeviceInfo,
+          };
+
+          const result = registerTablet(projectId, ws, signId, deviceInfo);
           if (!result.success) {
             ws.send(JSON.stringify({ type: 'rejected', reason: result.reason }));
             return;
           }
-          ws.role   = 'tablet';
-          ws.signId = signId;
+
+          ws.role      = 'tablet';
+          ws.projectId = projectId;
+          ws.signId    = signId;
+          ws.connId    = result.connId;
+
           ws.send(JSON.stringify({
             type: 'identified',
             role: 'tablet',
             signId,
             project,
-            activeSignId: getConnectionStatus().currentActiveSignId,
+            activeSignId: getConnectionStatus(projectId).currentActiveSignId,
           }));
           break;
         }
 
-        case 'slide_change': {
-          if (ws.role !== 'display') return;
-          const project = getActiveProject();
-          if (!project) return;
-          // project 전체를 넘겨 connections.js에서 slideOrder를 직접 계산
-          handleSlideChange(msg.slideIndex, project);
-          break;
-        }
-
-        case 'draw': {
-          if (ws.role !== 'tablet') return;
-          sendToDisplay({ type: 'draw', signId: ws.signId, x: msg.x, y: msg.y, action: msg.action });
-          break;
-        }
-
-        case 'sign_done': {
-          if (ws.role !== 'tablet') return;
-          sendToDisplay({ type: 'sign_done', signId: ws.signId });
-          break;
-        }
-
-        case 'sign_clear': {
-          if (ws.role !== 'tablet') return;
-          sendToDisplay({ type: 'sign_clear', signId: ws.signId });
-          break;
-        }
-
+        // ── 리모컨 식별 ───────────────────────────────────────────────────────
         case 'identify_remote': {
-          if (msg.token !== REMOTE_TOKEN) {
+          const { projectId, token } = msg;
+
+          if (!projectId) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'missing_project_id' }));
+            return;
+          }
+
+          const project = getProject(projectId);
+          if (!project) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'project_not_found' }));
+            return;
+          }
+
+          if (!isProjectActive(projectId)) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'project_not_active' }));
+            return;
+          }
+
+          if (!project.remoteToken || project.remoteToken !== token) {
             ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_token' }));
             return;
           }
-          const project = getActiveProject();
-          if (!project) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'no_active_project' }));
-            return;
-          }
-          registerRemote(ws);
-          ws.role = 'remote';
+
+          registerRemote(projectId, ws);
+          ws.role      = 'remote';
+          ws.projectId = projectId;
+
           ws.send(JSON.stringify({
             type: 'identified',
             role: 'remote',
             project,
-            currentSlideOrder: getCurrentSlideOrder(),
+            currentSlideOrder: getCurrentSlideOrder(projectId),
           }));
           break;
         }
 
+        // ── 슬라이드 변경 (메인 디스플레이만) ───────────────────────────────
+        case 'slide_change': {
+          if (ws.role !== 'main') return;
+          const project = getProject(ws.projectId);
+          if (!project) return;
+          handleSlideChange(ws.projectId, msg.slideIndex, project);
+          break;
+        }
+
+        // ── 그리기 (태블릿만) ────────────────────────────────────────────────
+        case 'draw': {
+          if (ws.role !== 'tablet') return;
+          sendToMain(ws.projectId, { type: 'draw', signId: ws.signId, x: msg.x, y: msg.y, action: msg.action });
+          break;
+        }
+
+        // ── 서명 완료 (태블릿만) ─────────────────────────────────────────────
+        case 'sign_done': {
+          if (ws.role !== 'tablet') return;
+          sendToMain(ws.projectId, { type: 'sign_done', signId: ws.signId });
+          break;
+        }
+
+        // ── 서명 초기화 (태블릿만) ───────────────────────────────────────────
+        case 'sign_clear': {
+          if (ws.role !== 'tablet') return;
+          sendToMain(ws.projectId, { type: 'sign_clear', signId: ws.signId });
+          break;
+        }
+
+        // ── 리모컨 슬라이드 제어 ─────────────────────────────────────────────
         case 'remote_slide': {
           if (ws.role !== 'remote') return;
-          // forward to display: { type: 'remote_slide', direction: 'prev'|'next' }
-          sendToDisplay({ type: 'remote_slide', direction: msg.direction });
+          // Forward to main display
+          sendToMain(ws.projectId, { type: 'remote_slide', direction: msg.direction });
           break;
         }
       }
     });
 
     ws.on('close', () => {
-      const { display, tablets } = getPool();
-      if (ws.role === 'display' && display === ws) {
-        unregisterDisplay();
-      } else if (ws.role === 'tablet' && ws.signId && tablets[ws.signId] === ws) {
-        unregisterTablet(ws.signId);
-      } else if (ws.role === 'remote') {
-        unregisterRemote(ws);
+      if (ws.projectId) {
+        unregisterConnection(ws.projectId, ws);
+        broadcastConnectionStatus(ws.projectId);
       }
     });
 

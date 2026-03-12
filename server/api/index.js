@@ -11,31 +11,52 @@ import Busboy from 'busboy';
 import {
   getProjects, getProject, createProject, updateProject, deleteProject,
   duplicateProject, addSlide, reorderSlides, removeSlide, updateSignatories,
-  getActiveProject, setActiveProject, isReady,
+  getActiveProjects, activateProject, deactivateProject, isProjectActive,
+  updateProjectPin, isReady,
 } from '../store/projects.js';
 import {
   getSignatures, saveSignature, clearSignatures, clearOneSignature,
 } from '../store/signatures.js';
 import {
-  getConnectionStatus, forceDisconnect, forceDisconnectAll, broadcastAll,
+  getConnectionStatus, forceDisconnect, forceDisconnectAll,
+  broadcastAll, broadcastActiveChanged,
 } from '../ws/connections.js';
 import {
   uploadSlideImage, deleteSlideImage, deleteProjectImages,
 } from '../infra/supabase.js';
-import { MAX_SLIDE_BYTES, REMOTE_TOKEN } from '../config.js';
+import { MAX_SLIDE_BYTES } from '../config.js';
 import { checkAuth, json, readBody, match, unauth, notFound } from './middleware.js';
 
-// ── Active project ────────────────────────────────────────────────────────────
+// ── Active projects ───────────────────────────────────────────────────────────
 
 async function getActive({ res }) {
-  json(res, 200, getActiveProject());
+  json(res, 200, getActiveProjects());
 }
 
 async function setActive({ req, res }) {
-  const { projectId } = await readBody(req);
-  const project = setActiveProject(projectId ?? null);
-  broadcastAll({ type: 'active_changed', project: project ?? null });
-  json(res, 200, { ok: true, project: project ?? null });
+  const { projectId, active } = await readBody(req);
+
+  if (!projectId) {
+    json(res, 400, { error: 'projectId required' });
+    return;
+  }
+
+  const project = getProject(projectId);
+  if (!project) {
+    notFound(res);
+    return;
+  }
+
+  let updatedProject;
+  if (active === false) {
+    deactivateProject(projectId);
+    updatedProject = null;
+  } else {
+    updatedProject = activateProject(projectId);
+  }
+
+  broadcastActiveChanged({ type: 'active_changed', project: updatedProject ?? null, projectId, active: active !== false });
+  json(res, 200, { ok: true, project: updatedProject ?? null });
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -62,6 +83,7 @@ async function updateProjectHandler({ req, res, params }) {
     updateSignatories(params.id, body.signatories);
     delete body.signatories;
   }
+  // Handle pin field via dedicated function for clarity, but updateProject also supports it
   const project = updateProject(params.id, body);
   if (!project) { notFound(res); return; }
   json(res, 200, project);
@@ -80,6 +102,24 @@ async function duplicateProjectHandler({ res, params }) {
   const project = duplicateProject(params.id);
   if (!project) { notFound(res); return; }
   json(res, 201, project);
+}
+
+// ── Pin ───────────────────────────────────────────────────────────────────────
+
+async function updatePinHandler({ req, res, params }) {
+  const { pin } = await readBody(req);
+  if (pin === undefined) { json(res, 400, { error: 'pin required' }); return; }
+  const project = updateProjectPin(params.id, pin);
+  if (!project) { notFound(res); return; }
+  json(res, 200, { ok: true });
+}
+
+// ── Remote token ──────────────────────────────────────────────────────────────
+
+async function getRemoteTokenHandler({ res, params }) {
+  const project = getProject(params.id);
+  if (!project) { notFound(res); return; }
+  json(res, 200, { token: project.remoteToken ?? null });
 }
 
 // ── Slides ────────────────────────────────────────────────────────────────────
@@ -169,16 +209,29 @@ async function clearOneSignatureHandler({ res, params }) {
   json(res, 200, { ok: true });
 }
 
-// ── Connections ───────────────────────────────────────────────────────────────
+// ── Connections / admin ───────────────────────────────────────────────────────
 
-async function getStatusHandler({ res }) {
-  json(res, 200, getConnectionStatus());
+/** GET /api/status — 전체 활성 프로젝트 상태 (하위 호환) */
+async function getGlobalStatusHandler({ res }) {
+  const active = getActiveProjects();
+  const statuses = Object.fromEntries(
+    active.map(p => [p.id, getConnectionStatus(p.id)])
+  );
+  json(res, 200, statuses);
 }
 
-async function disconnectHandler({ req, res }) {
+/** GET /api/projects/:id/status */
+async function getProjectStatusHandler({ res, params }) {
+  const project = getProject(params.id);
+  if (!project) { notFound(res); return; }
+  json(res, 200, getConnectionStatus(params.id));
+}
+
+/** POST /api/disconnect/:id */
+async function disconnectHandler({ req, res, params }) {
   const { target } = await readBody(req);
-  if (target === 'all') forceDisconnectAll();
-  else if (target) forceDisconnect(target);
+  if (target === 'all') forceDisconnectAll(params.id);
+  else if (target) forceDisconnect(params.id, target);
   json(res, 200, { ok: true });
 }
 
@@ -186,39 +239,43 @@ async function disconnectHandler({ req, res }) {
 // [HTTP method, URL pattern, requiresAuth, handler]
 
 const ROUTES = [
-  // Active project
-  ['GET',    '/api/active',                          false, getActive],
-  ['POST',   '/api/active',                          true,  setActive],
+  // Active projects
+  ['GET',    '/api/active',                              false, getActive],
+  ['POST',   '/api/active',                              true,  setActive],
 
   // Projects
-  ['GET',    '/api/projects',                        false, listProjects],
-  ['POST',   '/api/projects',                        true,  createProjectHandler],
-  ['GET',    '/api/projects/:id',                    false, getProjectHandler],
-  ['PUT',    '/api/projects/:id',                    true,  updateProjectHandler],
-  ['DELETE', '/api/projects/:id',                    true,  deleteProjectHandler],
-  ['POST',   '/api/projects/:id/duplicate',          true,  duplicateProjectHandler],
+  ['GET',    '/api/projects',                            false, listProjects],
+  ['POST',   '/api/projects',                            true,  createProjectHandler],
+  ['GET',    '/api/projects/:id',                        false, getProjectHandler],
+  ['PUT',    '/api/projects/:id',                        true,  updateProjectHandler],
+  ['DELETE', '/api/projects/:id',                        true,  deleteProjectHandler],
+  ['POST',   '/api/projects/:id/duplicate',              true,  duplicateProjectHandler],
 
-  // Slides (slide reorder must come before :slideId to avoid ambiguity)
-  ['POST',   '/api/projects/:id/slides',             true,  uploadSlideHandler],
-  ['PUT',    '/api/projects/:id/slides/reorder',     true,  reorderSlidesHandler],
-  ['DELETE', '/api/projects/:id/slides',             true,  clearAllSlidesHandler],
-  ['DELETE', '/api/projects/:id/slides/:slideId',    true,  deleteSlideHandler],
+  // Per-project PIN and remote token
+  ['PUT',    '/api/projects/:id/pin',                    true,  updatePinHandler],
+  ['GET',    '/api/projects/:id/remote-token',           true,  getRemoteTokenHandler],
+
+  // Per-project connection status and disconnect
+  ['GET',    '/api/projects/:id/status',                 false, getProjectStatusHandler],
+  ['POST',   '/api/disconnect/:id',                      true,  disconnectHandler],
+
+  // Slides (reorder must come before :slideId to avoid ambiguity)
+  ['POST',   '/api/projects/:id/slides',                 true,  uploadSlideHandler],
+  ['PUT',    '/api/projects/:id/slides/reorder',         true,  reorderSlidesHandler],
+  ['DELETE', '/api/projects/:id/slides',                 true,  clearAllSlidesHandler],
+  ['DELETE', '/api/projects/:id/slides/:slideId',        true,  deleteSlideHandler],
 
   // Signatures
-  ['GET',    '/api/projects/:id/signatures',         false, getSignaturesHandler],
-  ['POST',   '/api/projects/:id/signatures',         false, saveSignatureHandler],
-  ['DELETE', '/api/projects/:id/signatures',         true,  clearSignaturesHandler],
-  ['DELETE', '/api/projects/:id/signatures/:signId', true,  clearOneSignatureHandler],
+  ['GET',    '/api/projects/:id/signatures',             false, getSignaturesHandler],
+  ['POST',   '/api/projects/:id/signatures',             false, saveSignatureHandler],
+  ['DELETE', '/api/projects/:id/signatures',             true,  clearSignaturesHandler],
+  ['DELETE', '/api/projects/:id/signatures/:signId',     true,  clearOneSignatureHandler],
 
   // Auth ping (PIN 검증용)
-  ['GET',    '/api/me',                              true,  ({ res }) => json(res, 200, { ok: true })],
+  ['GET',    '/api/me',                                  true,  ({ res }) => json(res, 200, { ok: true })],
 
-  // Connections / admin
-  ['GET',    '/api/status',                          false, getStatusHandler],
-  ['POST',   '/api/disconnect',                      true,  disconnectHandler],
-
-  // Remote control token
-  ['GET',    '/api/remote-token',                    true,  ({ res }) => json(res, 200, { token: REMOTE_TOKEN })],
+  // Global status (하위 호환)
+  ['GET',    '/api/status',                              false, getGlobalStatusHandler],
 ];
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────

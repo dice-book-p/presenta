@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 const {
   _resetForTest,
   getProjects, getProject, createProject, updateProject, deleteProject, duplicateProject,
-  getActiveProject, setActiveProject, isReady,
+  getActiveProjects, activateProject, deactivateProject, isProjectActive, isReady,
   addSlide, reorderSlides, removeSlide,
   updateSignatories,
 } = await import('../server/store/projects.js');
@@ -19,22 +19,45 @@ beforeEach(() => _resetForTest());
 
 // ── Active project ────────────────────────────────────────────────────────────
 
-describe('getActiveProject() / setActiveProject()', () => {
+describe('getActiveProjects() / activateProject() / deactivateProject()', () => {
   it('초기에는 활성 프로젝트 없음', () => {
-    assert.equal(getActiveProject(), null);
+    assert.deepEqual(getActiveProjects(), []);
   });
 
   it('프로젝트 생성 후 활성화', () => {
     const p = createProject('Test');
-    setActiveProject(p.id);
-    assert.equal(getActiveProject()?.id, p.id);
+    activateProject(p.id);
+    const actives = getActiveProjects();
+    assert.equal(actives.length, 1);
+    assert.equal(actives[0].id, p.id);
+    assert.equal(isProjectActive(p.id), true);
   });
 
-  it('null 전달 시 비활성화', () => {
+  it('deactivateProject 시 비활성화', () => {
     const p = createProject('Test');
-    setActiveProject(p.id);
-    setActiveProject(null);
-    assert.equal(getActiveProject(), null);
+    activateProject(p.id);
+    deactivateProject(p.id);
+    assert.deepEqual(getActiveProjects(), []);
+    assert.equal(isProjectActive(p.id), false);
+  });
+
+  it('여러 프로젝트 동시 활성화 가능', () => {
+    const p1 = createProject('A');
+    const p2 = createProject('B');
+    activateProject(p1.id);
+    activateProject(p2.id);
+    assert.equal(getActiveProjects().length, 2);
+  });
+
+  it('이미 활성인 프로젝트 다시 활성화해도 중복 안 됨', () => {
+    const p = createProject('Test');
+    activateProject(p.id);
+    activateProject(p.id);
+    assert.equal(getActiveProjects().length, 1);
+  });
+
+  it('존재하지 않는 프로젝트 활성화 시 null 반환', () => {
+    assert.equal(activateProject('bad-id'), null);
   });
 });
 
@@ -93,11 +116,12 @@ describe('deleteProject()', () => {
     assert.equal(getProject(p.id), null);
   });
 
-  it('활성 프로젝트 삭제 시 activeProjectId null로 변경', () => {
+  it('활성 프로젝트 삭제 시 활성 목록에서도 제거', () => {
     const p = createProject('Active');
-    setActiveProject(p.id);
+    activateProject(p.id);
     deleteProject(p.id);
-    assert.equal(getActiveProject(), null);
+    assert.deepEqual(getActiveProjects(), []);
+    assert.equal(isProjectActive(p.id), false);
   });
 });
 
