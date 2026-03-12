@@ -1,10 +1,7 @@
 // WebSocket 서버 URL
-// dev: vite dev(5173) + ws-dev(3500) 분리 구조
+// dev: Vite proxy가 /ws → 8765, /api → 8765 로 포워딩
 // prod: 같은 서버에서 처리
-export const WS_URL = import.meta.env.DEV
-  ? 'ws://localhost:3500/ws'
-  : `ws://${window?.location?.host}/ws`;
+const _host = typeof window !== 'undefined' ? window.location.host : 'localhost';
 
-export const API_BASE = import.meta.env.DEV
-  ? 'http://localhost:3500'
-  : '';
+export const WS_URL = `ws://${_host}/ws`;
+export const API_BASE = '';

@@ -8,13 +8,18 @@ class WebSocketStore {
   #handlers = new Map();
   #reconnectTimer = null;
   #manualClose = false;
+  #currentWs = null; // tracks WS in CONNECTING state too (not reactive)
 
   connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    // Don't create another WS if already open or connecting
+    const rs = this.#currentWs?.readyState;
+    if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
+
     this.status = 'connecting';
     this.#manualClose = false;
 
     const ws = new WebSocket(WS_URL);
+    this.#currentWs = ws;
 
     ws.onopen = () => {
       this.status = 'connected';
@@ -28,6 +33,8 @@ class WebSocketStore {
         if (msg.type === 'force_disconnect') {
           this.status = 'force_disconnected';
           this.#manualClose = true;
+          const fdHandler = this.#handlers.get('force_disconnect');
+          if (fdHandler) fdHandler(msg);
           ws.close();
           return;
         }
@@ -39,7 +46,12 @@ class WebSocketStore {
     };
 
     ws.onclose = () => {
-      this.ws = null;
+      // Ignore stale close events from replaced connections
+      if (this.#currentWs !== ws && this.ws !== ws) return;
+
+      if (this.#currentWs === ws) this.#currentWs = null;
+      if (this.ws === ws) this.ws = null;
+
       if (this.#manualClose) return;
       if (this.status !== 'rejected') {
         this.status = 'disconnected';
@@ -56,7 +68,9 @@ class WebSocketStore {
   disconnect() {
     this.#manualClose = true;
     clearTimeout(this.#reconnectTimer);
-    this.ws?.close();
+    // Close both connecting and open WS
+    this.#currentWs?.close();
+    this.#currentWs = null;
     this.ws = null;
     this.status = 'disconnected';
   }

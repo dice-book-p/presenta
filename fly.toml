@@ -1,0 +1,33 @@
+app = "kdn-offline-show"
+primary_region = "nrt"  # Tokyo — 한국에서 가장 가까운 리전
+
+[build]
+
+[env]
+  PORT = "3000"
+  DATA_DIR = "/data"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false   # 슬립 방지 — 행사 중 끊김 없도록
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 100
+    soft_limit = 80
+
+[[statics]]
+  # SvelteKit adapter-node는 서버에서 직접 static 서빙하므로 별도 설정 불필요
+
+[mounts]
+  source = "kdn_data"
+  destination = "/data"
+  # fly volumes create kdn_data --region nrt  ← 최초 1회 실행 필요

@@ -4,6 +4,7 @@ import { handler } from '../build/handler.js';
 import { createWebSocketServer } from './websocket.js';
 import { signatories } from './signatories.js';
 import { forceDisconnect, forceDisconnectAll, getConnectionStatus } from './connections.js';
+import { saveSignature, getSignatures, clearSignatures } from './signatures-store.js';
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PIN = process.env.ADMIN_PIN || '1234';
@@ -21,6 +22,37 @@ const server = createServer((req, res) => {
   if (url.pathname === '/api/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(getConnectionStatus()));
+    return;
+  }
+
+  if (url.pathname === '/api/signatures' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(getSignatures()));
+    return;
+  }
+
+  if (url.pathname === '/api/signatures' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      const { signId, dataUrl } = JSON.parse(body || '{}');
+      if (signId && dataUrl) saveSignature(signId, dataUrl);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+
+  if (url.pathname === '/api/signatures' && req.method === 'DELETE') {
+    const pin = url.searchParams.get('pin');
+    if (pin !== ADMIN_PIN) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unauthorized' }));
+      return;
+    }
+    clearSignatures();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 

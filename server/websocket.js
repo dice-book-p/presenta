@@ -5,7 +5,7 @@ import {
   unregisterDisplay, unregisterTablet,
   findTabletSignId, handleSlideChange,
   sendToDisplay, broadcastConnectionStatus,
-  getConnectionStatus
+  getConnectionStatus, getConnections
 } from './connections.js';
 
 export function createWebSocketServer(server) {
@@ -25,6 +25,8 @@ export function createWebSocketServer(server) {
       } catch {
         return;
       }
+
+      console.log(`[WS] msg: ${msg.type}${msg.signId ? ` signId=${msg.signId}` : ''} role=${ws.role}`);
 
       switch (msg.type) {
 
@@ -58,7 +60,8 @@ export function createWebSocketServer(server) {
             type: 'identified',
             role: 'tablet',
             signId,
-            signatories
+            signatories,
+            activeSignId: getConnectionStatus().currentActiveSignId ?? null
           }));
           broadcastConnectionStatus();
           break;
@@ -97,10 +100,13 @@ export function createWebSocketServer(server) {
     });
 
     ws.on('close', () => {
+      const conns = getConnections();
       if (ws.role === 'display') {
-        unregisterDisplay();
+        // Only unregister if this WS is still the registered display
+        if (conns.display === ws) unregisterDisplay();
       } else if (ws.role === 'tablet' && ws.signId) {
-        unregisterTablet(ws.signId);
+        // Only unregister if this WS is still the registered tablet for this signId
+        if (conns.tablets[ws.signId] === ws) unregisterTablet(ws.signId);
       }
     });
 

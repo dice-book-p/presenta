@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { session } from '$lib/stores/session.svelte.js';
+  import { API_BASE } from '$lib/config.js';
 
   // ── Signatories ──────────────────────────────────────────────────────────────
   const SIGNATORIES = [
@@ -24,7 +25,7 @@
   let ctx = $derived.by(() => {
     if (!canvasEl) return null;
     const c = canvasEl.getContext('2d');
-    c.lineWidth = 3;
+    c.lineWidth = 6;
     c.lineCap = 'round';
     c.lineJoin = 'round';
     c.strokeStyle = '#1a1a2e';
@@ -123,7 +124,7 @@
 
   function setupHandlers() {
     cleanups.push(wsStore.on('identified', (msg) => {
-      connectedTablets = msg.connections ?? {};
+      if (msg.activeSignId !== undefined) activeSignId = msg.activeSignId;
     }));
 
     cleanups.push(wsStore.on('rejected', (msg) => {
@@ -137,7 +138,7 @@
     }));
 
     cleanups.push(wsStore.on('connection_status', (msg) => {
-      connectedTablets = msg.connections ?? {};
+      connectedTablets = msg.tablets ?? {};
     }));
 
     cleanups.push(wsStore.on('slide', (msg) => {
@@ -170,8 +171,20 @@
   });
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
-  onMount(() => {
+  onMount(async () => {
     setupHandlers();
+
+    // Fetch initial connection status so login screen shows correct availability
+    try {
+      const res = await fetch(`${API_BASE}/api/status`);
+      if (res.ok) {
+        const data = await res.json();
+        connectedTablets = data.tablets ?? {};
+        if (data.currentActiveSignId !== undefined) {
+          activeSignId = data.currentActiveSignId;
+        }
+      }
+    } catch {}
 
     // Restore session
     if (session.hasSession) {
@@ -207,7 +220,7 @@
 
       <div class="sign-list">
         {#each SIGNATORIES as sig}
-          {@const isConnected = connectedTablets[sig.id] === 'connected'}
+          {@const isConnected = connectedTablets[sig.id] === true}
           <button
             class="sign-item"
             class:occupied={isConnected}
@@ -612,15 +625,15 @@
 
   /* ── Canvas area ── */
   .canvas-wrap {
-    flex: 1;
     position: relative;
-    margin: 24px 20px 0;
+    width: calc(100% - 40px);
+    max-width: 720px;
+    height: 300px;
+    margin: 24px auto 0;
     border-radius: 14px;
     overflow: hidden;
     background: rgba(255, 255, 255, 0.97);
     border: 2px solid rgba(255, 255, 255, 0.12);
-    min-height: 320px;
-    max-height: 50vh;
   }
 
   .sig-canvas {

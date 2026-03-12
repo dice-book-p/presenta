@@ -62,7 +62,7 @@
       const res = await fetch(`${API_BASE}/api/admin/disconnect?pin=${encodeURIComponent(pin)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signId }),
+        body: JSON.stringify({ target: signId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -79,6 +79,27 @@
     }
   }
 
+  async function clearSignatures() {
+    actionMsg = '';
+    actionError = '';
+    loading = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/signatures?pin=${encodeURIComponent(pin)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        actionMsg = '서명이 모두 초기화되었습니다.';
+      } else {
+        const data = await res.json().catch(() => ({}));
+        actionError = data.error ?? '서명 초기화에 실패했습니다.';
+      }
+    } catch {
+      actionError = '서버에 연결할 수 없습니다.';
+    } finally {
+      loading = false;
+    }
+  }
+
   async function disconnectAll() {
     actionMsg = '';
     actionError = '';
@@ -87,7 +108,7 @@
       const res = await fetch(`${API_BASE}/api/admin/disconnect?pin=${encodeURIComponent(pin)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true }),
+        body: JSON.stringify({ target: 'all' }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -110,12 +131,12 @@
   }
 
   function isConnected(id) {
-    if (!status?.connections) return false;
-    return status.connections[id] === 'connected';
+    if (!status?.tablets) return false;
+    return status.tablets[id] === true;
   }
 
   function isDisplayConnected() {
-    return status?.display === 'connected';
+    return status?.display === true;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -171,6 +192,9 @@
         <div class="header-actions">
           <span class="refresh-note">3초마다 자동 갱신</span>
           <button class="outline-btn" onclick={fetchStatus}>새로고침</button>
+          <button class="warn-btn" disabled={loading} onclick={clearSignatures}>
+            서명 초기화
+          </button>
           <button class="danger-btn" disabled={loading} onclick={disconnectAll}>
             전체 연결 해제
           </button>
@@ -415,6 +439,28 @@
   .outline-btn:hover {
     background: rgba(255, 255, 255, 0.09);
     color: #f0e8d8;
+  }
+
+  .warn-btn {
+    padding: 9px 18px;
+    background: rgba(201, 168, 76, 0.1);
+    border: 1px solid rgba(201, 168, 76, 0.3);
+    border-radius: 8px;
+    color: #c9a84c;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .warn-btn:hover:not(:disabled) {
+    background: rgba(201, 168, 76, 0.2);
+    border-color: rgba(201, 168, 76, 0.5);
+  }
+
+  .warn-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .danger-btn {

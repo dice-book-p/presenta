@@ -63,7 +63,8 @@ export function broadcastConnectionStatus() {
 
 // display 등록
 export function registerDisplay(ws) {
-  if (connections.display?.readyState === WebSocket.OPEN) {
+  const existing = connections.display;
+  if (existing && existing !== ws && existing.readyState === WebSocket.OPEN) {
     return { success: false, reason: 'display_occupied' };
   }
   connections.display = ws;
@@ -73,8 +74,12 @@ export function registerDisplay(ws) {
 
 // tablet 등록
 export function registerTablet(ws, signId) {
-  if (connections.tablets[signId]?.readyState === WebSocket.OPEN) {
-    return { success: false, reason: 'tablet_occupied' };
+  const existing = connections.tablets[signId];
+  if (existing && existing !== ws) {
+    // Close stale or reconnecting WS (same device reconnect before old close was processed)
+    if (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING) {
+      existing.close();
+    }
   }
   connections.tablets[signId] = ws;
   broadcastConnectionStatus();
