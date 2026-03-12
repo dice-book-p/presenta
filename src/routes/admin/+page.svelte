@@ -725,9 +725,10 @@
                 <div class="form-group">
                   <div class="picker-tabs">
                     <button class="picker-tab" class:active={pickerMode==='canvas'} onclick={() => pickerMode = 'canvas'}>개인 서명 영역</button>
-                    {#if selectedProject.summarySlideId}
-                      <button class="picker-tab" class:active={pickerMode==='summary'} onclick={() => pickerMode = 'summary'}>종합 서명 영역</button>
-                    {/if}
+                    <button class="picker-tab" class:active={pickerMode==='summary'} onclick={() => pickerMode = 'summary'}>
+                      종합 서명 영역
+                      {#if !selectedProject.summarySlideId}<span class="tab-badge-warn">미설정</span>{/if}
+                    </button>
                   </div>
 
                   {#if true}
@@ -766,6 +767,11 @@
                         }}>초기화</button>
                       </div>
                     {/if}
+                  {:else if pickerMode === 'summary'}
+                    <div class="empty-state-warn">
+                      ⚠️ 종합 서약서 슬라이드가 지정되지 않았습니다.<br>
+                      <span>슬라이드 탭 → <strong>종합 서약서 슬라이드</strong> 드롭다운에서 해당 슬라이드를 먼저 선택해주세요.</span>
+                    </div>
                   {:else}
                     <div class="empty-state">서명 슬라이드를 먼저 선택해주세요.</div>
                   {/if}
@@ -1151,9 +1157,16 @@
 
   /* ── Position picker ── */
   .picker-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
-  .picker-tab { padding: 6px 14px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+  .picker-tab { display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
     border-radius: 6px; color: rgba(232,224,208,.5); font-size: 12px; font-family: inherit; cursor: pointer; }
   .picker-tab.active { background: rgba(201,168,76,.1); border-color: rgba(201,168,76,.3); color: #c9a84c; }
+  .tab-badge-warn { font-size: 10px; padding: 1px 5px; background: rgba(220,80,60,.2);
+    border: 1px solid rgba(220,80,60,.4); border-radius: 4px; color: #e07070; }
+  .empty-state-warn { padding: 20px; border-radius: 8px; background: rgba(220,80,60,.07);
+    border: 1px solid rgba(220,80,60,.2); color: rgba(232,224,208,.6); font-size: 13px;
+    line-height: 1.7; }
+  .empty-state-warn strong { color: #c9a84c; }
   .picker-hint { font-size: 12px; color: rgba(232,224,208,.4); margin: 0 0 8px; }
   .picker-wrap { position: relative; border-radius: 8px; overflow: hidden; cursor: crosshair;
     user-select: none; border: 1px solid rgba(255,255,255,.1); }
