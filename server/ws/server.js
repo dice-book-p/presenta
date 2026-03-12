@@ -1,10 +1,18 @@
+/**
+ * WebSocket 서버 (인프라 레이어)
+ *
+ * - 클라이언트 식별(identify_display / identify_tablet)
+ * - 그리기 이벤트, 서명 완료/초기화 중계
+ * - 주기적 Heartbeat (ping/pong)
+ */
 import { WebSocketServer } from 'ws';
-import { getActiveProject } from './projects-store.js';
+import { getActiveProject } from '../store/projects.js';
+import { WS_HEARTBEAT_MS } from '../config.js';
 import {
   registerDisplay, registerTablet,
   unregisterDisplay, unregisterTablet,
   handleSlideChange, sendToDisplay,
-  broadcastConnectionStatus, getConnectionStatus, getConnections,
+  broadcastConnectionStatus, getConnectionStatus, getPool,
 } from './connections.js';
 
 export function createWebSocketServer(server) {
@@ -78,12 +86,8 @@ export function createWebSocketServer(server) {
           if (ws.role !== 'display') return;
           const project = getActiveProject();
           if (!project) return;
-          // attach _slideOrder to each signatory for handleSlideChange lookup
-          const sigsWithOrder = project.signatories.map(s => {
-            const slide = project.slides.find(sl => sl.id === s.slideId);
-            return { ...s, _slideOrder: slide?.order ?? -1 };
-          });
-          handleSlideChange(msg.slideIndex, sigsWithOrder);
+          // project 전체를 넘겨 connections.js에서 slideOrder를 직접 계산
+          handleSlideChange(msg.slideIndex, project);
           break;
         }
 
@@ -108,10 +112,10 @@ export function createWebSocketServer(server) {
     });
 
     ws.on('close', () => {
-      const conns = getConnections();
-      if (ws.role === 'display' && conns.display === ws) {
+      const { display, tablets } = getPool();
+      if (ws.role === 'display' && display === ws) {
         unregisterDisplay();
-      } else if (ws.role === 'tablet' && ws.signId && conns.tablets[ws.signId] === ws) {
+      } else if (ws.role === 'tablet' && ws.signId && tablets[ws.signId] === ws) {
         unregisterTablet(ws.signId);
       }
     });
@@ -120,14 +124,14 @@ export function createWebSocketServer(server) {
   });
 
   // Heartbeat
-  const interval = setInterval(() => {
+  const heartbeat = setInterval(() => {
     wss.clients.forEach(ws => {
       if (!ws.isAlive) return ws.terminate();
       ws.isAlive = false;
       ws.ping();
     });
-  }, 30000);
+  }, WS_HEARTBEAT_MS);
 
-  wss.on('close', () => clearInterval(interval));
+  wss.on('close', () => clearInterval(heartbeat));
   return wss;
 }

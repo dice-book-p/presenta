@@ -1,3 +1,9 @@
+/**
+ * Supabase 스토리지 어댑터 (인프라 레이어)
+ *
+ * 외부 서비스(Supabase)와의 모든 통신을 여기에서 캡슐화한다.
+ * 비즈니스 로직(store/)은 이 모듈에만 의존하며, Supabase SDK를 직접 import하지 않는다.
+ */
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 

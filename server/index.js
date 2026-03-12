@@ -1,13 +1,11 @@
 // 프로덕션 서버: SvelteKit + WebSocket 통합
 import { createServer } from 'http';
 import { handler } from '../build/handler.js';
-import { createWebSocketServer } from './websocket.js';
-import { handleApi } from './api.js';
-import { initProjectsStore } from './projects-store.js';
-import { initSignaturesStore } from './signatures-store.js';
-
-const PORT     = process.env.PORT || 3000;
-const ADMIN_PIN = process.env.ADMIN_PIN || '1234';
+import { createWebSocketServer } from './ws/server.js';
+import { handleApi } from './api/index.js';
+import { initProjectsStore } from './store/projects.js';
+import { initSignaturesStore } from './store/signatures.js';
+import { PORT, ADMIN_PIN } from './config.js';
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);

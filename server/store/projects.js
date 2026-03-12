@@ -1,8 +1,16 @@
+/**
+ * 프로젝트 인메모리 스토어 (데이터 접근 레이어)
+ *
+ * - 단일 활성 프로젝트 모델 지원
+ * - 모든 변경은 Supabase(data 버킷)에 비동기 영속화 (fire-and-forget)
+ * - 서버 시작 시 initProjectsStore()를 호출해야 한다
+ */
 import { randomUUID } from 'crypto';
-import { loadData, saveData } from './supabase.js';
+import { loadData, saveData } from '../infra/supabase.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+/** @type {{ activeProjectId: string|null, projects: Project[] }} */
 let store = { activeProjectId: null, projects: [] };
 let ready = false;
 
@@ -19,9 +27,7 @@ export async function initProjectsStore() {
   console.log(`[projects] ready — ${store.projects.length} projects, active: ${store.activeProjectId}`);
 }
 
-export function isReady() {
-  return ready;
-}
+export const isReady = () => ready;
 
 function persist() {
   saveData('projects.json', store).catch(e =>
@@ -44,13 +50,9 @@ export function setActiveProject(projectId) {
 
 // ── Projects CRUD ─────────────────────────────────────────────────────────────
 
-export function getProjects() {
-  return store.projects;
-}
+export const getProjects = () => store.projects;
 
-export function getProject(id) {
-  return store.projects.find(p => p.id === id) ?? null;
-}
+export const getProject  = (id) => store.projects.find(p => p.id === id) ?? null;
 
 export function createProject(name) {
   const project = {
@@ -69,8 +71,7 @@ export function createProject(name) {
 export function updateProject(id, updates) {
   const project = getProject(id);
   if (!project) return null;
-  const allowed = ['name', 'summarySlideId', 'signatories', 'slides'];
-  for (const key of allowed) {
+  for (const key of ['name', 'summarySlideId', 'signatories', 'slides']) {
     if (key in updates) project[key] = updates[key];
   }
   persist();
@@ -94,8 +95,8 @@ export function duplicateProject(id) {
     id: randomUUID(),
     name: `${src.name} (복사본)`,
     createdAt: new Date().toISOString(),
+    // 서명자 ID만 새로 발급, 슬라이드 URL은 공유
     signatories: src.signatories.map(s => ({ ...s, id: randomUUID() })),
-    // slides share same Supabase URLs (no re-upload)
   };
   store.projects.push(copy);
   persist();
@@ -132,7 +133,6 @@ export function removeSlide(projectId, slideId) {
     .filter(s => s.id !== slideId)
     .map((s, i) => ({ ...s, order: i }));
   if (project.slides.length === before) return false;
-  // Clear summarySlideId if removed
   if (project.summarySlideId === slideId) project.summarySlideId = null;
   persist();
   return true;
@@ -144,13 +144,13 @@ export function updateSignatories(projectId, signatories) {
   const project = getProject(projectId);
   if (!project) return null;
   project.signatories = signatories.map((s, i) => ({
-    id: s.id || randomUUID(),
-    order: i + 1,
-    title: s.title || '',
-    name: s.name || '',
-    color: s.color || '#ffffff',
-    slideId: s.slideId || null,
-    canvasArea: s.canvasArea || null,
+    id:          s.id || randomUUID(),
+    order:       i + 1,
+    title:       s.title       || '',
+    name:        s.name        || '',
+    color:       s.color       || '#ffffff',
+    slideId:     s.slideId     || null,
+    canvasArea:  s.canvasArea  || null,
     summaryArea: s.summaryArea || null,
   }));
   persist();

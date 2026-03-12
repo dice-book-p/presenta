@@ -1,17 +1,17 @@
 // 개발 환경 전용 서버 (Vite proxy → port 8765)
 import { createServer } from 'http';
-import { createWebSocketServer } from './websocket.js';
-import { handleApi } from './api.js';
-import { initProjectsStore } from './projects-store.js';
-import { initSignaturesStore } from './signatures-store.js';
+import { createWebSocketServer } from './ws/server.js';
+import { handleApi } from './api/index.js';
+import { initProjectsStore } from './store/projects.js';
+import { initSignaturesStore } from './store/signatures.js';
+import { ADMIN_PIN } from './config.js';
 
-const PORT     = 8765;
-const ADMIN_PIN = process.env.ADMIN_PIN || '1234';
+const PORT = 8765;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
-  // CORS (Vite dev server와 분리된 포트이므로)
+  // CORS (Vite dev server와 포트가 분리되어 있으므로)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
