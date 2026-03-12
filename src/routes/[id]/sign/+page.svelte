@@ -780,6 +780,11 @@
     text-align: center;
   }
 
+  /* 모바일에서는 QR 불필요 (이미 모바일로 접속 중) */
+  @media (max-width: 768px) {
+    .qr-section { display: none; }
+  }
+
   .back-link {
     margin-top: 4px;
     background: none;
