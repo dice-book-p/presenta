@@ -607,9 +607,12 @@
                   <div class="slide-row" class:summary={slide.id === selectedProject.summarySlideId}>
                     <span class="slide-num">{slide.order + 1}</span>
                     <img class="slide-thumb" src={slide.url} alt="슬라이드 {slide.order + 1}" loading="lazy" />
-                    {#if slide.id === selectedProject.summarySlideId}
-                      <span class="tag-summary">종합</span>
-                    {/if}
+                    <div class="slide-info">
+                      <span class="slide-filename">{slide.filename}</span>
+                      {#if slide.id === selectedProject.summarySlideId}
+                        <span class="tag-summary">종합 서약서</span>
+                      {/if}
+                    </div>
                     <div class="row-actions">
                       <button class="btn-icon" onclick={() => moveSlide(slide.id, -1)} disabled={i === 0}>↑</button>
                       <button class="btn-icon" onclick={() => moveSlide(slide.id, 1)}
@@ -1048,14 +1051,21 @@
   .upload-item.done { color: #80c883; background: rgba(76,175,80,.1); }
   .upload-item.error { color: #e07070; background: rgba(200,60,60,.1); }
   .slide-list { display: flex; flex-direction: column; gap: 8px; }
-  .slide-row { display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.03);
-    border: 1px solid rgba(255,255,255,.07); border-radius: 10px; padding: 10px 14px; }
-  .slide-row.summary { border-color: rgba(201,168,76,.25); }
-  .slide-num { font-size: 13px; color: rgba(232,224,208,.4); min-width: 24px; text-align: center; }
-  .slide-thumb { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(255,255,255,.08); }
-  .tag-summary { font-size: 11px; padding: 2px 7px; background: rgba(201,168,76,.15);
-    border: 1px solid rgba(201,168,76,.3); border-radius: 8px; color: #c9a84c; }
-  .row-actions { margin-left: auto; display: flex; gap: 6px; }
+  .slide-row { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 14px;
+    transition: background .15s; }
+  .slide-row:hover { background: rgba(255,255,255,.07); }
+  .slide-row.summary { border-color: rgba(201,168,76,.4); background: rgba(201,168,76,.04); }
+  .slide-num { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.7); min-width: 24px; text-align: center; }
+  .slide-thumb { width: 96px; height: 54px; object-fit: cover; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,.12); flex-shrink: 0; }
+  .slide-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .slide-filename { font-size: 12px; color: rgba(232,224,208,.85); font-family: monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag-summary { font-size: 11px; padding: 2px 8px; background: rgba(201,168,76,.18);
+    border: 1px solid rgba(201,168,76,.4); border-radius: 8px; color: #c9a84c;
+    align-self: flex-start; font-weight: 600; }
+  .row-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
   /* ── Signatory form ── */
   .form-card { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
