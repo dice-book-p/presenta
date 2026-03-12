@@ -22,7 +22,7 @@ import {
 import {
   uploadSlideImage, deleteSlideImage, deleteProjectImages,
 } from '../infra/supabase.js';
-import { MAX_SLIDE_BYTES } from '../config.js';
+import { MAX_SLIDE_BYTES, REMOTE_TOKEN } from '../config.js';
 import { checkAuth, json, readBody, match, unauth, notFound } from './middleware.js';
 
 // ── Active project ────────────────────────────────────────────────────────────
@@ -216,6 +216,9 @@ const ROUTES = [
   // Connections / admin
   ['GET',    '/api/status',                          false, getStatusHandler],
   ['POST',   '/api/disconnect',                      true,  disconnectHandler],
+
+  // Remote control token
+  ['GET',    '/api/remote-token',                    true,  ({ res }) => json(res, 200, { token: REMOTE_TOKEN })],
 ];
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────

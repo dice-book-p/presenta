@@ -11,6 +11,8 @@ const pool = {
   display: null,            // ws | null
   tablets: {},              // { [signId]: ws }
   currentActiveSignId: null,
+  remotes: new Set(),       // mobile remote controls
+  currentSlideOrder: 0,     // last known slide order
 };
 
 // ── 저수준 헬퍼 ───────────────────────────────────────────────────────────────
@@ -29,12 +31,15 @@ export function getConnectionStatus() {
       Object.entries(pool.tablets).map(([id, ws]) => [id, isOpen(ws)])
     ),
     currentActiveSignId: pool.currentActiveSignId,
+    remoteCount: pool.remotes.size,
   };
 }
 
 // ── 전송 ──────────────────────────────────────────────────────────────────────
 
 export const sendToDisplay = (data) => safeSend(pool.display, data);
+
+export const sendToRemotes = (data) => pool.remotes.forEach(ws => safeSend(ws, data));
 
 export function broadcastToTablets(data) {
   Object.values(pool.tablets).forEach(ws => safeSend(ws, data));
@@ -50,9 +55,14 @@ export function broadcastConnectionStatus() {
   const status = { type: 'connection_status', ...getConnectionStatus() };
   sendToDisplay(status);
   broadcastToTablets(status);
+  sendToRemotes(status);
 }
 
 // ── 등록 / 해제 ───────────────────────────────────────────────────────────────
+
+export function registerRemote(ws) { pool.remotes.add(ws); }
+export function unregisterRemote(ws) { pool.remotes.delete(ws); }
+export const getCurrentSlideOrder = () => pool.currentSlideOrder;
 
 export function registerDisplay(ws) {
   const existing = pool.display;
@@ -103,6 +113,7 @@ export function handleSlideChange(slideIndex, project) {
   }) ?? null;
 
   pool.currentActiveSignId = signatory?.id ?? null;
+  pool.currentSlideOrder   = slideIndex;
 
   broadcastToTablets({
     type:         'slide',
@@ -110,6 +121,8 @@ export function handleSlideChange(slideIndex, project) {
     activeSignId: pool.currentActiveSignId,
     signatory,
   });
+
+  sendToRemotes({ type: 'slide_update', slideOrder: slideIndex });
 }
 
 // ── 관리자 강제 해제 ─────────────────────────────────────────────────────────

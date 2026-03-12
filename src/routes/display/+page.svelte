@@ -226,6 +226,11 @@
       clearCanvas(msg.signId);
     }));
 
+    unsubs.push(wsStore.on('remote_slide', (msg) => {
+      if (msg.direction === 'next') goToSlide(currentSlide + 1);
+      else if (msg.direction === 'prev') goToSlide(currentSlide - 1);
+    }));
+
     // identify 전송 (연결 직후 & 재연결 시)
     let identifyInterval = setInterval(() => {
       if (wsStore.status === 'connected' && !identified && !rejected) {

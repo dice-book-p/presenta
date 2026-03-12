@@ -86,6 +86,20 @@
   let connInterval    = null;
   let signatures      = $state({});
 
+  // ── Remote QR ──────────────────────────────────────────────────────────────
+  let remoteQr = $state('');
+
+  async function loadRemoteQr() {
+    const r = await fetch(`${API_BASE}/api/remote-token`, { headers: authHeaders() });
+    if (!r.ok) return;
+    const { token: remoteToken } = await r.json();
+    const base = window.location.origin;
+    const QRCode = await import('qrcode');
+    remoteQr = await QRCode.default.toDataURL(`${base}/remote?t=${remoteToken}`, {
+      width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0a0a0f' }
+    });
+  }
+
   // ── Guide ──────────────────────────────────────────────────────────────────
   let showGuide = $state(false);
 
@@ -565,7 +579,10 @@
     activeTab = tab;
     editSig = null;
     if (tab === 'signatures') await loadSignatures();
-    if (tab === 'connections') await loadConnStatus();
+    if (tab === 'connections') {
+      await loadConnStatus();
+      if (!remoteQr) await loadRemoteQr();
+    }
     saveNavState();
   }
 
@@ -1214,6 +1231,23 @@
               </div>
             {/if}
 
+            <!-- 리모컨 QR -->
+            <div class="remote-qr-section">
+              <div class="section-sub-title">📱 모바일 리모컨</div>
+              <p class="helper-text">이 QR 코드를 스캔하면 스마트폰으로 슬라이드를 조작할 수 있습니다.</p>
+              {#if remoteQr}
+                <div class="qr-grid">
+                  <div class="qr-card">
+                    <div class="qr-card-label">슬라이드 리모컨</div>
+                    <img class="qr-img" src={remoteQr} alt="리모컨 QR" />
+                    <code class="qr-url">/remote?t=···</code>
+                  </div>
+                </div>
+              {:else}
+                <button class="btn-outline btn-sm" onclick={loadRemoteQr}>QR 생성</button>
+              {/if}
+            </div>
+
           </div>
 
         <!-- ── Project: Signatures ── -->
@@ -1534,6 +1568,10 @@
   .conn-info { flex: 1; }
   .conn-label { font-size: 14px; font-weight: 600; color: #f0e8d8; }
   .conn-sub { font-size: 12px; color: rgba(232,224,208,.35); }
+
+  /* ── Remote QR section ── */
+  .section-sub-title { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.7); margin-bottom: 4px; }
+  .remote-qr-section { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
 
   /* ── QR ── */
   .qr-grid { display: flex; gap: 20px; flex-wrap: wrap; }

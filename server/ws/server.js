@@ -7,12 +7,13 @@
  */
 import { WebSocketServer } from 'ws';
 import { getActiveProject } from '../store/projects.js';
-import { WS_HEARTBEAT_MS } from '../config.js';
+import { WS_HEARTBEAT_MS, REMOTE_TOKEN } from '../config.js';
 import {
   registerDisplay, registerTablet,
   unregisterDisplay, unregisterTablet,
   handleSlideChange, sendToDisplay,
   broadcastConnectionStatus, getConnectionStatus, getPool,
+  registerRemote, unregisterRemote, sendToRemotes, getCurrentSlideOrder,
 } from './connections.js';
 
 export function createWebSocketServer(server) {
@@ -108,6 +109,34 @@ export function createWebSocketServer(server) {
           sendToDisplay({ type: 'sign_clear', signId: ws.signId });
           break;
         }
+
+        case 'identify_remote': {
+          if (msg.token !== REMOTE_TOKEN) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_token' }));
+            return;
+          }
+          const project = getActiveProject();
+          if (!project) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'no_active_project' }));
+            return;
+          }
+          registerRemote(ws);
+          ws.role = 'remote';
+          ws.send(JSON.stringify({
+            type: 'identified',
+            role: 'remote',
+            project,
+            currentSlideOrder: getCurrentSlideOrder(),
+          }));
+          break;
+        }
+
+        case 'remote_slide': {
+          if (ws.role !== 'remote') return;
+          // forward to display: { type: 'remote_slide', direction: 'prev'|'next' }
+          sendToDisplay({ type: 'remote_slide', direction: msg.direction });
+          break;
+        }
       }
     });
 
@@ -117,6 +146,8 @@ export function createWebSocketServer(server) {
         unregisterDisplay();
       } else if (ws.role === 'tablet' && ws.signId && tablets[ws.signId] === ws) {
         unregisterTablet(ws.signId);
+      } else if (ws.role === 'remote') {
+        unregisterRemote(ws);
       }
     });
 
