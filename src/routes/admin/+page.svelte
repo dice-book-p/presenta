@@ -1302,12 +1302,17 @@
 
             {#if uploadFiles.length > 0}
               <div class="upload-queue">
-                {#each uploadFiles as f}
+                {#each uploadFiles as f, i}
                   <span class="upload-item" class:done={f.status==='done'} class:error={f.status==='error'}>
                     {f.name} {f.status==='uploading' ? '...' : f.status==='done' ? '완료' : f.status==='error' ? `오류: ${f.error}` : ''}
+                    {#if f.status === 'error'}
+                      <button class="upload-item-dismiss" onclick={() => { uploadFiles = uploadFiles.filter((_, idx) => idx !== i); }}>✕</button>
+                    {/if}
                   </span>
                 {/each}
-                <button class="btn-ghost btn-sm" onclick={() => uploadFiles = uploadFiles.filter(f => f.status !== 'done')}>완료 항목 지우기</button>
+                {#if uploadFiles.some(f => f.status === 'error')}
+                  <button class="btn-ghost btn-sm" onclick={() => { uploadFiles = []; }}>모두 닫기</button>
+                {/if}
               </div>
             {/if}
 
@@ -2002,7 +2007,10 @@
   .upload-item { font-size: 12px; padding: 3px 8px; border-radius: 4px;
     background: rgba(255,255,255,.06); color: rgba(232,224,208,.5); }
   .upload-item.done { color: #80c883; background: rgba(76,175,80,.1); }
-  .upload-item.error { color: #e07070; background: rgba(200,60,60,.1); }
+  .upload-item.error { color: #e07070; background: rgba(200,60,60,.1); display: inline-flex; align-items: center; gap: 6px; }
+  .upload-item-dismiss { background: none; border: none; color: rgba(224,112,112,.6); font-size: 11px;
+    cursor: pointer; padding: 0 2px; line-height: 1; font-family: inherit; }
+  .upload-item-dismiss:hover { color: #e07070; }
   .slide-list { display: flex; flex-direction: column; gap: 8px; }
   .slide-row { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,.04);
     border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 14px;
