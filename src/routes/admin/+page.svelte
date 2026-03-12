@@ -8,17 +8,68 @@
   let pinError  = $state('');
   let token     = $state('');
 
+  const SS_TOKEN = 'admin_token';
+  const SS_STATE = 'admin_state';
+
   function submitPin() {
     token = pinInput;
     fetch(`${API_BASE}/api/me`, { headers: authHeaders() }).then(r => {
       if (r.status === 401) { pinError = 'PIN이 올바르지 않습니다.'; pinInput = ''; token = ''; }
-      else { pinView = false; loadAll(); startConnPoll(); }
+      else {
+        sessionStorage.setItem(SS_TOKEN, token);
+        pinView = false;
+        loadAll().then(restoreNavState);
+        startConnPoll();
+      }
     }).catch(() => { pinError = '서버에 연결할 수 없습니다.'; token = ''; });
   }
 
   function authHeaders(extra = {}) {
     return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, ...extra };
   }
+
+  // ── Session persistence ────────────────────────────────────────────────────
+  function saveNavState() {
+    if (!token) return;
+    sessionStorage.setItem(SS_STATE, JSON.stringify({
+      projectId: selectedProject?.id ?? null,
+      tab: activeTab,
+    }));
+  }
+
+  async function restoreNavState() {
+    const raw = sessionStorage.getItem(SS_STATE);
+    if (!raw) return;
+    try {
+      const { projectId, tab } = JSON.parse(raw);
+      if (projectId) {
+        const p = projects.find(pr => pr.id === projectId);
+        if (p) {
+          await openProject(p);
+          if (tab && tab !== 'slides') await changeTab(tab);
+        }
+      }
+    } catch {}
+  }
+
+  // onMount: 저장된 토큰으로 자동 로그인 시도
+  onMount(async () => {
+    const saved = sessionStorage.getItem(SS_TOKEN);
+    if (!saved) return;
+    token = saved;
+    const ok = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() })
+      .then(r => r.ok).catch(() => false);
+    if (ok) {
+      pinView = false;
+      await loadAll();
+      await restoreNavState();
+      startConnPoll();
+    } else {
+      token = '';
+      sessionStorage.removeItem(SS_TOKEN);
+      sessionStorage.removeItem(SS_STATE);
+    }
+  });
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   let activeTab       = $state('slides');  // 'slides'|'signatories'|'connections'|'signatures'
@@ -54,6 +105,129 @@
     { value: '#ff6b6b', label: '빨강' },
     { value: '#74b9ff', label: '파랑' },
   ];
+
+  // ── Image color analysis ────────────────────────────────────────────────────
+  let analyzedColors = $state([]);
+  let analyzing      = $state(false);
+  let analyzeError   = $state('');
+
+  /** 상대 휘도 (WCAG) */
+  function relativeLuminance(r, g, b) {
+    const sRGB = [r, g, b].map(v => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2];
+  }
+
+  /** WCAG 대비비 */
+  function contrastRatio(l1, l2) {
+    const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  /** 이미지 URL → 추천 텍스트 색상 목록 */
+  async function analyzeSlideColors(imageUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          // 분석용 캔버스 (최대 320px로 축소, 속도 우선)
+          const MAX = 320;
+          const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+          const w = Math.floor(img.width * scale);
+          const h = Math.floor(img.height * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+
+          // 픽셀 샘플링 (4픽셀 간격 → 빠른 처리)
+          const data = ctx.getImageData(0, 0, w, h).data;
+          const buckets = new Map();
+          const STEP = 4; // px 간격
+          for (let y = 0; y < h; y += STEP) {
+            for (let x = 0; x < w; x += STEP) {
+              const i = (y * w + x) * 4;
+              if (data[i + 3] < 200) continue; // 투명 제외
+              // 32단위로 양자화 (색상 버킷화)
+              const r = Math.round(data[i]     / 32) * 32;
+              const g = Math.round(data[i + 1] / 32) * 32;
+              const b = Math.round(data[i + 2] / 32) * 32;
+              const key = (r << 16) | (g << 8) | b;
+              buckets.set(key, (buckets.get(key) || 0) + 1);
+            }
+          }
+
+          const total = [...buckets.values()].reduce((s, c) => s + c, 0);
+          if (total === 0) { resolve([]); return; }
+
+          // 가장 많은 색 = 배경 후보 (상위 3개)
+          const sorted = [...buckets.entries()].sort((a, b) => b[1] - a[1]);
+          const bgLums = sorted.slice(0, 3).map(([k]) => {
+            const r = (k >> 16) & 0xff;
+            const g = (k >> 8)  & 0xff;
+            const b =  k        & 0xff;
+            return relativeLuminance(r, g, b);
+          });
+          const bgLum = bgLums[0]; // 주 배경 휘도
+
+          // 후보 색상: 빈도 0.3%~25%, 배경과 대비비 4.5 이상 (WCAG AA 기준)
+          const candidates = sorted
+            .filter(([, c]) => {
+              const pct = c / total;
+              return pct >= 0.003 && pct <= 0.25;
+            })
+            .map(([k, c]) => {
+              const r = (k >> 16) & 0xff;
+              const g = (k >> 8)  & 0xff;
+              const b =  k        & 0xff;
+              const lum = relativeLuminance(r, g, b);
+              const cr = contrastRatio(lum, bgLum);
+              const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+              return { hex, cr, count: c };
+            })
+            .filter(c => c.cr >= 3.5)  // 최소 대비 기준
+            .sort((a, b) => b.cr - a.cr) // 대비 높은 순
+            .slice(0, 8)
+            .map(c => c.hex);
+
+          resolve(candidates);
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = () => reject(new Error('이미지 로드 실패'));
+      img.src = imageUrl;
+    });
+  }
+
+  async function runColorAnalysis() {
+    const slide = selectedProject?.slides?.find(s => s.id === editSig?.slideId);
+    if (!slide) return;
+    analyzing = true;
+    analyzeError = '';
+    analyzedColors = [];
+    try {
+      const colors = await analyzeSlideColors(slide.url);
+      analyzedColors = colors;
+      if (colors.length === 0) analyzeError = '분석 가능한 색상을 찾지 못했습니다.';
+    } catch (e) {
+      analyzeError = e.message.includes('로드 실패') || e.message.includes('tainted')
+        ? 'CORS 제한으로 이미지를 분석할 수 없습니다.'
+        : '분석 중 오류가 발생했습니다.';
+    }
+    analyzing = false;
+  }
+
+  // 서명 슬라이드가 바뀌면 분석 결과 초기화
+  $effect(() => {
+    if (editSig?.slideId !== undefined) {
+      analyzedColors = [];
+      analyzeError = '';
+    }
+  });
 
   // ── Position Picker ────────────────────────────────────────────────────────
   let pickerEl   = $state(null);
@@ -153,6 +327,7 @@
     sidebarOpen = false;
     showGuide = false;
     await loadProject(p.id);
+    saveNavState();
   }
 
   // Name edit
@@ -391,6 +566,7 @@
     editSig = null;
     if (tab === 'signatures') await loadSignatures();
     if (tab === 'connections') await loadConnStatus();
+    saveNavState();
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -852,6 +1028,33 @@
                   </span>
                 </div>
 
+                <!-- 이미지 색상 분석 -->
+                {#if editSig.slideId}
+                  <div class="color-analyze-wrap">
+                    <button class="btn-analyze" disabled={analyzing} onclick={runColorAnalysis}>
+                      {analyzing ? '분석 중...' : '🎨 슬라이드에서 색상 추출'}
+                    </button>
+                    {#if analyzeError}
+                      <span class="analyze-error">{analyzeError}</span>
+                    {/if}
+                    {#if analyzedColors.length > 0}
+                      <div class="analyzed-colors">
+                        <span class="analyzed-label">추천 색상 (배경 대비 높은 순)</span>
+                        <div class="analyzed-swatches">
+                          {#each analyzedColors as color}
+                            <button class="color-swatch analyzed"
+                              class:selected={editSig.color === color}
+                              style="background:{color};outline-color:{editSig.color === color ? '#c9a84c' : 'transparent'}"
+                              onclick={() => editSig = { ...editSig, color }}
+                              title={color}>
+                            </button>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+
                 <!-- 서명 슬라이드 -->
                 <div class="form-section-label">위치 설정</div>
                 <div class="form-group">
@@ -1271,6 +1474,19 @@
   .color-custom-label { font-size: 12px; color: rgba(232,224,208,.5); white-space: nowrap; }
   .color-preview-text { font-size: 15px; font-weight: 700; padding: 4px 8px;
     background: rgba(255,255,255,.04); border-radius: 6px; letter-spacing: .02em; }
+
+  /* ── Color analysis ── */
+  .color-analyze-wrap { display: flex; flex-direction: column; gap: 10px; }
+  .btn-analyze { align-self: flex-start; padding: 6px 14px; background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: rgba(232,224,208,.7);
+    font-size: 12px; font-family: inherit; cursor: pointer; transition: all .2s; }
+  .btn-analyze:hover:not(:disabled) { background: rgba(201,168,76,.1); border-color: rgba(201,168,76,.3); color: #c9a84c; }
+  .btn-analyze:disabled { opacity: .5; cursor: not-allowed; }
+  .analyze-error { font-size: 12px; color: #e07070; }
+  .analyzed-colors { display: flex; flex-direction: column; gap: 8px; }
+  .analyzed-label { font-size: 11px; color: rgba(232,224,208,.35); letter-spacing: .04em; }
+  .analyzed-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .color-swatch.analyzed { width: 32px; height: 32px; border-radius: 8px; }
 
   /* ── Signatory list ── */
   .sig-list { display: flex; flex-direction: column; gap: 8px; }

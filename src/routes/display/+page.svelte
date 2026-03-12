@@ -150,11 +150,14 @@
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────
+  const SS_SLIDE = 'display_slide';
+
   function goToSlide(idx) {
     if (!sortedSlides.length) return;
     const newIdx = Math.max(0, Math.min(sortedSlides.length - 1, idx));
     if (newIdx === currentSlide) return;
     currentSlide = newIdx;
+    sessionStorage.setItem(SS_SLIDE, String(newIdx));
     wsStore.send({ type: 'slide_change', slideIndex: sortedSlides[newIdx].order });
   }
 
@@ -181,6 +184,14 @@
         project = msg.project;
         noProject = false;
         ctxMap = {};  // reset ctx cache on project load
+        // 저장된 슬라이드 인덱스 복원
+        const saved = sessionStorage.getItem(SS_SLIDE);
+        if (saved !== null) {
+          const idx = parseInt(saved, 10);
+          if (!isNaN(idx) && idx < msg.project.slides.length) {
+            currentSlide = idx;
+          }
+        }
         await tick(); // wait for canvas elements to bind
         restoreSignatures();
       }
@@ -198,8 +209,9 @@
       }
     }));
 
-    // 활성 프로젝트 변경 → 자동 리로드
+    // 활성 프로젝트 변경 → 슬라이드 인덱스 초기화 후 리로드
     unsubs.push(wsStore.on('active_changed', () => {
+      sessionStorage.removeItem(SS_SLIDE);
       window.location.reload();
     }));
 
