@@ -464,8 +464,8 @@
       </div>
     {/if}
 
-    <!-- 숫자 입력 표시 -->
-    {#if slideNumBuffer}
+    <!-- 숫자 입력 표시 (슬라이드 번호 표시 옵션 켜져있을 때만) -->
+    {#if showSlideNumber && slideNumBuffer}
       <div class="slide-num-indicator">
         <span class="num-label">이동:</span>
         <span class="num-value">{slideNumBuffer}</span>
