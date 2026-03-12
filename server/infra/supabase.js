@@ -12,7 +12,7 @@ let adapter;
 
 if (process.env.SUPABASE_URL) {
   adapter = await import('./supabase-adapter.js');
-  console.log('[storage] using Supabase');
+  console.log('[storage] using Supabase (DB + Storage)');
 } else {
   adapter = await import('./local-storage.js');
   console.log('[storage] using local filesystem (data/ & uploads/)');
