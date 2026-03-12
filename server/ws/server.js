@@ -50,7 +50,7 @@ export function createWebSocketServer(server) {
 
         // ── 메인 디스플레이 식별 ──────────────────────────────────────────────
         case 'identify_display': {
-          const { projectId, pin, role = 'main', deviceInfo: clientDeviceInfo = {} } = msg;
+          const { projectId, role = 'main', deviceInfo: clientDeviceInfo = {} } = msg;
 
           if (!projectId) {
             ws.send(JSON.stringify({ type: 'rejected', reason: 'missing_project_id' }));
@@ -68,11 +68,7 @@ export function createWebSocketServer(server) {
             return;
           }
 
-          // Pin validation: empty pin means no pin required
-          if (project.pin && project.pin !== pin) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_pin' }));
-            return;
-          }
+          // display는 PIN 검증 불필요 (관리자 화면에서 링크로 접근)
 
           const deviceInfo = {
             ip: ws._ip,
