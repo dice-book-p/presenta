@@ -35,14 +35,8 @@
   let connInterval    = null;
   let signatures      = $state({});
 
-  // ── QR ─────────────────────────────────────────────────────────────────────
-  let displayQr = $state('');
-  let signQr    = $state('');
-
-  async function genQr(text) {
-    const QRCode = await import('qrcode');
-    return QRCode.default.toDataURL(text, { width: 180, margin: 1, color: { dark: '#c9a84c', light: '#0a0a0f' } });
-  }
+  // ── Guide ──────────────────────────────────────────────────────────────────
+  let showGuide = $state(false);
 
   // ── Slide upload ───────────────────────────────────────────────────────────
   let uploadFiles = $state([]);
@@ -157,10 +151,8 @@
     activeTab = 'slides';
     editSig = null;
     sidebarOpen = false;
+    showGuide = false;
     await loadProject(p.id);
-    const base = typeof window !== 'undefined' ? window.location.origin : '';
-    displayQr = await genQr(`${base}/display`);
-    signQr    = await genQr(`${base}/sign`);
   }
 
   // Name edit
@@ -490,6 +482,15 @@
             </nav>
           </div>
         {/if}
+
+        <!-- Guide link -->
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-bottom">
+          <button class="sidebar-guide-btn" class:active={showGuide}
+            onclick={() => { selectedProject = null; editSig = null; showGuide = true; }}>
+            📖 사용 가이드
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -509,7 +510,7 @@
 
         <div class="topbar-breadcrumb">
           {#if selectedProject}
-            <span class="topbar-bc-link" onclick={() => { selectedProject = null; editSig = null; }}>프로젝트</span>
+            <span class="topbar-bc-link" onclick={() => { selectedProject = null; editSig = null; showGuide = false; }}>프로젝트</span>
             <span class="topbar-bc-sep">/</span>
             {#if editingName}
               <input class="name-edit-input" bind:value={nameInput}
@@ -527,6 +528,10 @@
             {/if}
             <span class="topbar-bc-sep">/</span>
             <span class="topbar-bc-tab">{NAV_ITEMS.find(n => n.id === activeTab)?.label}</span>
+          {:else if showGuide}
+            <span class="topbar-bc-link" onclick={() => { showGuide = false; }}>프로젝트</span>
+            <span class="topbar-bc-sep">/</span>
+            <span class="topbar-bc-current">사용 가이드</span>
           {:else}
             <span class="topbar-bc-current">프로젝트 목록</span>
           {/if}
@@ -545,8 +550,146 @@
       <!-- ── Content Area ── -->
       <div class="content">
 
+        <!-- ── Guide ── -->
+        {#if showGuide && !selectedProject}
+          <div class="content-section guide-section">
+            <div class="section-header">
+              <h2 class="section-title">사용 가이드</h2>
+            </div>
+
+            <div class="guide-block">
+              <div class="guide-block-title">📋 시스템 개요</div>
+              <p class="guide-text">이 시스템은 세 가지 화면으로 구성됩니다.</p>
+              <div class="guide-table">
+                <div class="guide-table-row">
+                  <span class="guide-table-key">🖥 슬라이드쇼</span>
+                  <span class="guide-table-val">행사장 메인 화면(PC/빔프로젝터). 슬라이드를 표시하고 서명 결과를 실시간 반영합니다.</span>
+                </div>
+                <div class="guide-table-row">
+                  <span class="guide-table-key">✍ 서명자 화면</span>
+                  <span class="guide-table-val">서명자가 사용하는 태블릿 화면. 서명 후 슬라이드쇼에 반영됩니다.</span>
+                </div>
+                <div class="guide-table-row">
+                  <span class="guide-table-key">⚙ 관리자</span>
+                  <span class="guide-table-val">현재 화면. 프로젝트·슬라이드·서명자 설정 및 행사 진행 관리.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="guide-block">
+              <div class="guide-block-title">🚀 행사 준비 절차</div>
+
+              <div class="guide-step">
+                <div class="guide-step-num">1</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">프로젝트 생성</div>
+                  <div class="guide-step-desc">왼쪽 사이드바 <strong>프로젝트 +</strong> 버튼을 눌러 새 프로젝트를 만드세요. 행사명을 입력합니다. (예: 2025년 단체협약)</div>
+                </div>
+              </div>
+
+              <div class="guide-step">
+                <div class="guide-step-num">2</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">슬라이드 업로드</div>
+                  <div class="guide-step-desc">
+                    <strong>슬라이드 탭</strong> → 이미지 업로드 버튼 또는 드래그 앤 드롭으로 이미지를 추가합니다.<br>
+                    슬라이드 순서는 드래그로 변경할 수 있습니다. ⠿ 핸들을 잡고 드래그하세요.<br>
+                    <span class="guide-tip">💡 JPG, PNG, WebP 이미지를 지원합니다. 최대 10MB.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-step">
+                <div class="guide-step-num">3</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">종합 서약서 슬라이드 지정</div>
+                  <div class="guide-step-desc">
+                    <strong>슬라이드 탭</strong> → <strong>종합 서약서 슬라이드</strong> 드롭다운에서 모든 서명자가 서명하는 종합 슬라이드를 선택합니다.<br>
+                    <span class="guide-tip">💡 종합 슬라이드는 행사 마지막에 모든 서명자 서명이 합쳐져 표시되는 슬라이드입니다.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-step">
+                <div class="guide-step-num">4</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">서명자 등록 및 위치 설정</div>
+                  <div class="guide-step-desc">
+                    <strong>서명자 탭</strong> → <strong>+ 서명자 추가</strong>로 각 서명자를 등록합니다.<br>
+                    각 서명자에 대해:
+                    <ul class="guide-list">
+                      <li>직함과 이름 입력</li>
+                      <li>서명 색상 선택 (서명이 슬라이드에 표시되는 색)</li>
+                      <li><strong>서명 슬라이드</strong> 선택 (개인 서명이 표시될 슬라이드)</li>
+                      <li><strong>개인 서명 영역</strong>: 해당 슬라이드 위에서 드래그하여 서명 위치 지정</li>
+                      <li><strong>종합 서명 영역</strong>: 종합 서약서 슬라이드 위에서 드래그하여 위치 지정</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div class="guide-step">
+                <div class="guide-step-num">5</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">프로젝트 활성화</div>
+                  <div class="guide-step-desc">
+                    프로젝트 목록에서 <strong>활성화</strong> 버튼을 클릭합니다. 활성화된 프로젝트만 슬라이드쇼와 서명자 화면에 표시됩니다.<br>
+                    <span class="guide-tip">💡 동시에 하나의 프로젝트만 활성화 가능합니다.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="guide-block">
+              <div class="guide-block-title">🎬 행사 진행</div>
+              <div class="guide-step">
+                <div class="guide-step-num">1</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">기기 연결</div>
+                  <div class="guide-step-desc">
+                    루트 페이지(<code class="guide-code">/</code>)에서 QR 코드를 확인할 수 있습니다.<br>
+                    <ul class="guide-list">
+                      <li>슬라이드쇼 PC: <strong>슬라이드쇼 표출</strong> QR 스캔 또는 <code class="guide-code">/display</code> 접속</li>
+                      <li>각 서명자 태블릿: <strong>서명자 화면</strong> QR 스캔 또는 <code class="guide-code">/sign</code> 접속 → 본인 이름 선택</li>
+                    </ul>
+                    <strong>연결현황 탭</strong>에서 각 기기의 연결 상태를 실시간으로 확인할 수 있습니다.
+                  </div>
+                </div>
+              </div>
+              <div class="guide-step">
+                <div class="guide-step-num">2</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">서명 진행</div>
+                  <div class="guide-step-desc">
+                    서명자가 태블릿에서 서명하면 자동으로 슬라이드쇼 화면에 반영됩니다.<br>
+                    개인 슬라이드 → 해당 서명자 서명이 지정 위치에 표시<br>
+                    종합 슬라이드 → 모든 서명자 서명이 합쳐져 표시
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="guide-block">
+              <div class="guide-block-title">📝 서명 관리</div>
+              <p class="guide-text">
+                <strong>서명관리 탭</strong>에서 각 서명자의 서명 완료 여부를 확인하고, 필요 시 서명을 초기화할 수 있습니다.<br>
+                개별 초기화 또는 전체 초기화가 가능합니다.
+              </p>
+            </div>
+
+            <div class="guide-block">
+              <div class="guide-block-title">⚠️ 주의사항</div>
+              <ul class="guide-list guide-warn-list">
+                <li>프로젝트 삭제 시 슬라이드 이미지도 함께 삭제됩니다.</li>
+                <li>서명자 순서(번호)는 ↑↓ 버튼으로 조정할 수 있습니다. 순서가 변경되면 서명자 화면 목록 순서도 바뀝니다.</li>
+                <li>서명 위치를 지정하지 않으면 서명이 슬라이드에 표시되지 않습니다.</li>
+                <li>프로젝트를 복제하면 슬라이드 이미지는 공유되며 서명자는 새 ID로 복제됩니다.</li>
+              </ul>
+            </div>
+          </div>
+
         <!-- ── Projects home (no project selected) ── -->
-        {#if !selectedProject}
+        {:else if !selectedProject}
           <div class="content-section">
             <div class="section-header">
               <h2 class="section-title">프로젝트 목록</h2>
@@ -868,18 +1011,6 @@
               </div>
             {/if}
 
-            <div class="qr-grid">
-              <div class="qr-card">
-                <div class="qr-card-label">슬라이드쇼 PC</div>
-                {#if displayQr}<img class="qr-img" src={displayQr} alt="display QR" />{/if}
-                <code class="qr-url">{typeof window !== 'undefined' ? window.location.origin : ''}/display</code>
-              </div>
-              <div class="qr-card">
-                <div class="qr-card-label">서명 태블릿</div>
-                {#if signQr}<img class="qr-img" src={signQr} alt="sign QR" />{/if}
-                <code class="qr-url">{typeof window !== 'undefined' ? window.location.origin : ''}/sign</code>
-              </div>
-            </div>
           </div>
 
         <!-- ── Project: Signatures ── -->
@@ -1199,4 +1330,40 @@
   /* ── Sig preview ── */
   .sig-preview { width: 80px; height: 32px; object-fit: contain; border: 1px solid rgba(255,255,255,.1);
     border-radius: 4px; }
+
+  /* ── Sidebar bottom / guide btn ── */
+  .sidebar-spacer { flex: 1; }
+  .sidebar-bottom { padding: 12px 10px; border-top: 1px solid rgba(255,255,255,.06); }
+  .sidebar-guide-btn { width: 100%; padding: 9px 14px; background: none; border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px; color: rgba(232,224,208,.4); font-size: 13px; font-family: inherit;
+    text-align: left; cursor: pointer; transition: all .15s; }
+  .sidebar-guide-btn:hover { background: rgba(255,255,255,.05); color: rgba(232,224,208,.8); }
+  .sidebar-guide-btn.active { background: rgba(201,168,76,.08); border-color: rgba(201,168,76,.25); color: #c9a84c; }
+
+  /* ── Guide content ── */
+  .guide-section { max-width: 760px; }
+  .guide-block { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+  .guide-block-title { font-size: 15px; font-weight: 700; color: #f0e8d8; }
+  .guide-text { margin: 0; font-size: 13px; color: rgba(232,224,208,.65); line-height: 1.7; }
+  .guide-table { display: flex; flex-direction: column; gap: 10px; }
+  .guide-table-row { display: flex; gap: 16px; align-items: flex-start; padding: 12px 16px;
+    background: rgba(255,255,255,.03); border-radius: 8px; }
+  .guide-table-key { font-size: 13px; font-weight: 700; color: #c9a84c; min-width: 130px; flex-shrink: 0; }
+  .guide-table-val { font-size: 13px; color: rgba(232,224,208,.6); line-height: 1.6; }
+  .guide-step { display: flex; gap: 16px; align-items: flex-start; }
+  .guide-step-num { width: 28px; height: 28px; border-radius: 50%; background: rgba(201,168,76,.15);
+    border: 1px solid rgba(201,168,76,.3); color: #c9a84c; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  .guide-step-body { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .guide-step-title { font-size: 14px; font-weight: 700; color: #f0e8d8; }
+  .guide-step-desc { font-size: 13px; color: rgba(232,224,208,.6); line-height: 1.7; }
+  .guide-tip { display: inline-block; margin-top: 4px; padding: 4px 10px;
+    background: rgba(201,168,76,.07); border: 1px solid rgba(201,168,76,.15);
+    border-radius: 6px; color: rgba(232,224,208,.55); font-size: 12px; }
+  .guide-list { margin: 6px 0 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+  .guide-list li { font-size: 13px; color: rgba(232,224,208,.6); line-height: 1.6; }
+  .guide-warn-list li { color: rgba(232,100,100,.75); }
+  .guide-code { font-family: monospace; font-size: 12px; padding: 1px 6px;
+    background: rgba(255,255,255,.08); border-radius: 4px; color: rgba(232,224,208,.8); }
 </style>
