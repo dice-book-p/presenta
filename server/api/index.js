@@ -29,8 +29,15 @@ import { checkAuth, json, readBody, match, unauth, notFound } from './middleware
 
 // ── Active projects ───────────────────────────────────────────────────────────
 
+/** pin/remoteToken 등 민감 필드를 제거한 공개용 프로젝트 객체 */
+function publicProject(p) {
+  if (!p) return null;
+  const { pin, remoteToken, ...safe } = p;
+  return { ...safe, hasPin: !!pin };
+}
+
 async function getActive({ res }) {
-  json(res, 200, getActiveProjects());
+  json(res, 200, getActiveProjects().map(publicProject));
 }
 
 async function setActive({ req, res }) {
@@ -62,7 +69,7 @@ async function setActive({ req, res }) {
 // ── Projects ──────────────────────────────────────────────────────────────────
 
 async function listProjects({ res }) {
-  json(res, 200, getProjects());
+  json(res, 200, getProjects().map(publicProject));
 }
 
 async function createProjectHandler({ req, res }) {
@@ -74,7 +81,7 @@ async function createProjectHandler({ req, res }) {
 async function getProjectHandler({ res, params }) {
   const project = getProject(params.id);
   if (!project) { notFound(res); return; }
-  json(res, 200, project);
+  json(res, 200, publicProject(project));
 }
 
 async function updateProjectHandler({ req, res, params }) {
@@ -112,6 +119,19 @@ async function updatePinHandler({ req, res, params }) {
   const project = updateProjectPin(params.id, pin);
   if (!project) { notFound(res); return; }
   json(res, 200, { ok: true });
+}
+
+/** POST /api/projects/:id/verify-pin — 프로젝트 PIN 검증 (공개) */
+async function verifyPinHandler({ req, res, params }) {
+  const project = getProject(params.id);
+  if (!project) { notFound(res); return; }
+  if (!project.pin) { json(res, 200, { ok: true }); return; }
+  const { pin } = await readBody(req);
+  if (pin === project.pin) {
+    json(res, 200, { ok: true });
+  } else {
+    json(res, 401, { ok: false, error: 'PIN이 올바르지 않습니다' });
+  }
 }
 
 // ── Remote token ──────────────────────────────────────────────────────────────
@@ -252,6 +272,7 @@ const ROUTES = [
   ['POST',   '/api/projects/:id/duplicate',              true,  duplicateProjectHandler],
 
   // Per-project PIN and remote token
+  ['POST',   '/api/projects/:id/verify-pin',             false, verifyPinHandler],
   ['PUT',    '/api/projects/:id/pin',                    true,  updatePinHandler],
   ['GET',    '/api/projects/:id/remote-token',           true,  getRemoteTokenHandler],
 
