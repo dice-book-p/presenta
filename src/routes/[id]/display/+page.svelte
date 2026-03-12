@@ -551,7 +551,7 @@
           <h3>이전 진행 위치가 있습니다</h3>
           <p>{savedSlideIdx + 1}번 슬라이드부터 이어서 보시겠습니까?</p>
           <div class="exit-actions">
-            <button class="exit-btn cancel" onclick={() => { showResumePrompt = false; if (autoPlay) startAutoPlay(); }}>처음부터</button>
+            <button class="exit-btn cancel" onclick={() => { goToSlide(0); showResumePrompt = false; if (autoPlay) startAutoPlay(); }}>처음부터</button>
             <button class="exit-btn confirm-gold" onclick={() => { goToSlide(savedSlideIdx); showResumePrompt = false; if (autoPlay) startAutoPlay(); }}>이어보기</button>
           </div>
         </div>
