@@ -460,9 +460,114 @@
 
   function handleFiles(files) {
     const imageFiles = files.filter(f => f.type.startsWith('image/'));
-    const entries = imageFiles.map(f => ({ name: f.name, status: 'pending' }));
-    uploadFiles = [...uploadFiles, ...entries];
-    imageFiles.forEach(processAndUpload);
+    const pdfFiles   = files.filter(f => f.type === 'application/pdf');
+
+    // 이미지 파일 업로드
+    if (imageFiles.length) {
+      const entries = imageFiles.map(f => ({ name: f.name, status: 'pending' }));
+      uploadFiles = [...uploadFiles, ...entries];
+      imageFiles.forEach(processAndUpload);
+    }
+
+    // PDF → 페이지별 이미지 변환 후 업로드
+    pdfFiles.forEach(processPdfUpload);
+  }
+
+  // ── PDF 처리 ──────────────────────────────────────────────────────────────
+  let pdfWorkerReady = false;
+
+  async function ensurePdfWorker() {
+    if (pdfWorkerReady) return;
+    const pdfjsLib = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url
+    ).href;
+    pdfWorkerReady = true;
+  }
+
+  async function processPdfUpload(file) {
+    const baseName = file.name.replace(/\.pdf$/i, '');
+
+    // PDF 전체 진행 표시
+    uploadFiles = [...uploadFiles, { name: `${file.name} (PDF 변환 중...)`, status: 'uploading' }];
+    const pdfIdx = uploadFiles.length - 1;
+
+    try {
+      await ensurePdfWorker();
+      const pdfjsLib = await import('pdfjs-dist');
+      const arrayBuf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+      const pageCount = pdf.numPages;
+
+      // PDF 진행 상태 업데이트
+      uploadFiles[pdfIdx] = { ...uploadFiles[pdfIdx], name: `${file.name} (${pageCount}페이지 변환 중...)` };
+
+      for (let i = 1; i <= pageCount; i++) {
+        const pageName = `${baseName}_p${i}.webp`;
+        uploadFiles = [...uploadFiles, { name: pageName, status: 'uploading' }];
+        const pageIdx = uploadFiles.length - 1;
+
+        try {
+          const blob = await renderPdfPageToBlob(pdf, i);
+          // 가짜 File 객체 생성 후 기존 업로드 로직과 동일하게 처리
+          const projectId = selectedProject?.id;
+          if (!projectId) { uploadFiles[pageIdx] = { ...uploadFiles[pageIdx], status: 'error', error: '프로젝트 미선택' }; continue; }
+
+          const form = new FormData();
+          form.append('file', blob, pageName);
+          const r = await fetch(`${API_BASE}/api/projects/${projectId}/slides`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: form,
+          });
+          if (r.ok) {
+            const slide = await r.json();
+            if (selectedProject?.id === projectId) {
+              selectedProject = { ...selectedProject, slides: [...selectedProject.slides, slide] };
+            }
+            uploadFiles[pageIdx] = { ...uploadFiles[pageIdx], status: 'done' };
+          } else {
+            const d = await r.json().catch(() => ({}));
+            uploadFiles[pageIdx] = { ...uploadFiles[pageIdx], status: 'error', error: d.error || '업로드 실패' };
+          }
+        } catch (e) {
+          uploadFiles[pageIdx] = { ...uploadFiles[pageIdx], status: 'error', error: e.message };
+        }
+      }
+
+      uploadFiles[pdfIdx] = { ...uploadFiles[pdfIdx], name: `${file.name} (${pageCount}페이지)`, status: 'done' };
+    } catch (e) {
+      uploadFiles[pdfIdx] = { ...uploadFiles[pdfIdx], status: 'error', error: `PDF 처리 실패: ${e.message}` };
+    }
+  }
+
+  async function renderPdfPageToBlob(pdf, pageNum) {
+    const page = await pdf.getPage(pageNum);
+    // 고해상도 렌더링 (scale 2.0 → ~1920px 상당)
+    const viewport = page.getViewport({ scale: 2.0 });
+    const MAX = 1920;
+    let scale = 2.0;
+    if (viewport.width > MAX || viewport.height > MAX) {
+      scale = scale * MAX / Math.max(viewport.width, viewport.height);
+    }
+    const finalViewport = page.getViewport({ scale });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = finalViewport.width;
+    canvas.height = finalViewport.height;
+    const ctx = canvas.getContext('2d');
+
+    // 흰 배경 (PDF 투명 배경 대비)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    await page.render({ canvasContext: ctx, viewport: finalViewport }).promise;
+
+    return new Promise((resolve, reject) => {
+      const supportsWebP = canvas.toDataURL('image/webp').startsWith('data:image/webp');
+      const type = supportsWebP ? 'image/webp' : 'image/jpeg';
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Canvas 변환 실패')), type, 0.85);
+    });
   }
 
   // ── Drag & Drop 슬라이드 순서 변경 ──────────────────────────────────────────
@@ -882,7 +987,7 @@
                   <div class="guide-step-desc">
                     <strong>슬라이드 탭</strong> → 이미지 업로드 버튼 또는 드래그 앤 드롭으로 이미지를 추가합니다.<br>
                     슬라이드 순서는 드래그로 변경할 수 있습니다. ⠿ 핸들을 잡고 드래그하세요.<br>
-                    <span class="guide-tip">💡 JPG, PNG, WebP 이미지를 지원합니다. 최대 10MB.</span>
+                    <span class="guide-tip">💡 JPG, PNG, WebP 이미지 및 PDF 파일을 지원합니다. PDF는 페이지별로 자동 변환됩니다.</span>
                   </div>
                 </div>
               </div>
@@ -1025,8 +1130,8 @@
               <h2 class="section-title">슬라이드</h2>
               <div class="section-header-actions">
                 <label class="btn-gold btn-sm upload-btn">
-                  이미지 업로드
-                  <input type="file" accept="image/*" multiple style="display:none"
+                  이미지 / PDF 업로드
+                  <input type="file" accept="image/*,.pdf" multiple style="display:none"
                     onchange={e => handleFiles([...e.target.files])} />
                 </label>
                 <button class="btn-sm btn-danger" onclick={clearAllSlides}>전체 삭제</button>
@@ -1048,7 +1153,7 @@
               ondragover={e => { e.preventDefault(); isDragOver = true; }}
               ondragleave={() => isDragOver = false}
               ondrop={handleFileDrop}>
-              이미지 파일을 여기에 드래그하거나 위 버튼으로 업로드하세요
+              이미지 또는 PDF 파일을 여기에 드래그하거나 위 버튼으로 업로드하세요
             </div>
 
             <div class="field-row">

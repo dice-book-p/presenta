@@ -27,6 +27,7 @@
 		"@supabase/supabase-js": "^2.99.1",
 		"@sveltejs/adapter-node": "^5.5.4",
 		"busboy": "^1.6.0",
+		"pdfjs-dist": "^5.5.207",
 		"qrcode": "^1.5.4",
 		"ws": "^8.19.0"
 	}
