@@ -14,6 +14,7 @@
   let pinInput = $state('');
   let pinError = $state('');
   let notFound = $state(false);
+  let signQr = $state('');
 
   /** PIN 인증된 프로젝트 ID 목록을 sessionStorage에서 관리 */
   function isPinVerified(id) {
@@ -46,6 +47,17 @@
       step = 'roles';
     }
     loading = false;
+
+    // 서명 페이지 QR 생성
+    if (project) {
+      try {
+        const QRCode = await import('qrcode');
+        const signUrl = `${window.location.origin}/${projectId}/sign`;
+        signQr = await QRCode.default.toDataURL(signUrl, {
+          width: 160, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
+        });
+      } catch {}
+    }
   });
 
   async function verifyPin() {
@@ -115,6 +127,17 @@
             <span class="btn-desc">태블릿 / 서명 입력용</span>
           </button>
         </div>
+
+        <!-- 서명 QR: PC에서만 표시 -->
+        {#if signQr}
+          <div class="qr-section">
+            <div class="qr-divider"></div>
+            <p class="qr-label">📱 태블릿 서명 접속</p>
+            <img class="qr-img" src={signQr} alt="서명 페이지 QR" />
+            <p class="qr-hint">태블릿이나 모바일에서 스캔하면 서명 페이지로 바로 접속됩니다</p>
+          </div>
+        {/if}
+
         <button class="back-btn" onclick={goBack}>← 다른 행사 선택</button>
       {/if}
     {/if}
@@ -358,5 +381,48 @@
 
   .back-btn:hover {
     color: rgba(201, 168, 76, 0.7);
+  }
+
+  /* ── QR section ── */
+  .qr-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: -8px;
+  }
+
+  .qr-divider {
+    width: 50px;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin-bottom: 2px;
+  }
+
+  .qr-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(232, 224, 208, 0.5);
+    margin: 0;
+  }
+
+  .qr-img {
+    width: 120px;
+    height: 120px;
+    border-radius: 10px;
+    border: 1px solid rgba(201, 168, 76, 0.2);
+  }
+
+  .qr-hint {
+    font-size: 12px;
+    color: rgba(232, 224, 208, 0.3);
+    margin: 0;
+    text-align: center;
+    max-width: 260px;
+    line-height: 1.4;
+  }
+
+  @media (max-width: 768px) {
+    .qr-section { display: none; }
   }
 </style>
