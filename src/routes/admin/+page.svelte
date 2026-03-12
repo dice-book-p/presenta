@@ -1511,18 +1511,18 @@
 
             {#if connStatus}
               <div class="conn-list">
-                <div class="conn-row" class:connected={connStatus.display}>
-                  <span class="conn-dot" class:on={connStatus.display}></span>
+                <div class="conn-row" class:connected={connStatus.mainDisplay?.connected}>
+                  <span class="conn-dot" class:on={connStatus.mainDisplay?.connected}></span>
                   <div class="conn-info">
                     <div class="conn-label">슬라이드쇼 PC</div>
-                    <div class="conn-sub">{connStatus.display ? '연결됨' : '미연결'}</div>
+                    <div class="conn-sub">{connStatus.mainDisplay?.connected ? '연결됨' : '미연결'}</div>
                   </div>
-                  {#if connStatus.display}
-                    <button class="btn-sm btn-danger" onclick={() => disconnect('display')}>해제</button>
+                  {#if connStatus.mainDisplay?.connected}
+                    <button class="btn-sm btn-danger" onclick={() => disconnect('main')}>해제</button>
                   {/if}
                 </div>
                 {#each (selectedProject.signatories || []) as sig (sig.id)}
-                  {@const connected = connStatus.tablets?.[sig.id] === true}
+                  {@const connected = connStatus.tablets?.[sig.id]?.connected === true}
                   <div class="conn-row" class:connected>
                     <span class="conn-dot" class:on={connected}></span>
                     <div class="conn-info">
@@ -1534,6 +1534,15 @@
                     {/if}
                   </div>
                 {/each}
+                {#if connStatus.remoteCount > 0}
+                  <div class="conn-row connected">
+                    <span class="conn-dot on"></span>
+                    <div class="conn-info">
+                      <div class="conn-label">리모컨</div>
+                      <div class="conn-sub">{connStatus.remoteCount}대 연결됨</div>
+                    </div>
+                  </div>
+                {/if}
               </div>
             {/if}
 

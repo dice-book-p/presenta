@@ -128,11 +128,7 @@ export function createWebSocketServer(server) {
             return;
           }
 
-          // Pin validation
-          if (project.pin && project.pin !== pin) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_pin' }));
-            return;
-          }
+          // Pin 검증 제거 — 서명 QR은 관리자가 의도적으로 공유하므로 PIN 불필요
 
           const signatory = project.signatories.find(s => s.id === signId);
           if (!signatory) {

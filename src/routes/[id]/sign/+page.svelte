@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { session } from '$lib/stores/session.svelte.js';
@@ -254,6 +255,7 @@
         <div class="logo-badge">Presenta</div>
         <h1>서명자 선택</h1>
         <p class="login-sub">서명하실 역할을 선택해주세요</p>
+        <button class="back-link" onclick={() => goto(`/${projectId}`)}>← 돌아가기</button>
       </div>
 
       {#if loadError}
@@ -720,4 +722,17 @@
   }
 
   .gold-btn:hover { background: rgba(201, 168, 76, 0.25); border-color: #c9a84c; }
+
+  .back-link {
+    margin-top: 4px;
+    background: none;
+    border: none;
+    color: rgba(232, 224, 208, 0.35);
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 6px 12px;
+    transition: color 0.2s;
+  }
+  .back-link:hover { color: rgba(201, 168, 76, 0.7); }
 </style>

@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { tick } from 'svelte';
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
@@ -163,6 +164,7 @@
   let boundaryToastTimer = null;
   let showControls = $state(false);     // 컨트롤 바 표시
   let controlsTimer = null;
+  let showExitConfirm = $state(false); // 나가기 확인 다이얼로그
 
   const SS_SLIDE = 'display_slide';
 
@@ -243,6 +245,12 @@
       toggleLoop();
     } else if (e.key === 'a' || e.key === 'A') {
       toggleAutoPlay();
+    } else if (e.key === 'Escape') {
+      if (showExitConfirm) {
+        showExitConfirm = false;
+      } else {
+        showExitConfirm = true;
+      }
     }
   }
 
@@ -360,6 +368,7 @@
       <h2>대기 중</h2>
       <p>활성 프로젝트가 없습니다.</p>
       <p class="sub">관리자가 프로젝트를 활성화하면 자동으로 연결됩니다.</p>
+      <button class="back-link" onclick={() => goto(`/${projectId}`)}>← 돌아가기</button>
     </div>
   </div>
 
@@ -373,6 +382,7 @@
       <button class="gold-btn" onclick={() => { rejected = false; identified = false; wsStore.connect(); }}>
         다시 시도
       </button>
+      <button class="back-link" onclick={() => goto(`/${projectId}`)}>← 돌아가기</button>
     </div>
   </div>
 
@@ -413,6 +423,22 @@
         ></canvas>
       {/each}
     </div>
+
+    <!-- 나가기 확인 다이얼로그 -->
+    {#if showExitConfirm}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="exit-overlay" onclick={() => { showExitConfirm = false; }}>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="exit-dialog" onclick={(e) => e.stopPropagation()}>
+          <h3>슬라이드쇼를 종료하시겠습니까?</h3>
+          <p>현재 진행 중인 슬라이드쇼 연결이 해제됩니다.</p>
+          <div class="exit-actions">
+            <button class="exit-btn cancel" onclick={() => { showExitConfirm = false; }}>취소</button>
+            <button class="exit-btn confirm" onclick={() => goto(`/${projectId}`)}>종료</button>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- 경계 안내 토스트 -->
     {#if boundaryToast}
@@ -477,9 +503,19 @@
 
       <div class="ctrl-divider"></div>
 
+      <!-- 나가기 -->
+      <button class="ctrl-btn" onclick={() => { showExitConfirm = true; }} title="나가기 (Esc)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span>나가기</span>
+      </button>
+
+      <div class="ctrl-divider"></div>
+
       <!-- 단축키 안내 -->
       <div class="ctrl-hint">
-        Space/Arrow: 넘김 | F: 전체화면 | L: 반복 | A: 자동
+        Space/Arrow: 넘김 | F: 전체화면 | L: 반복 | A: 자동 | Esc: 나가기
       </div>
     </div>
   </div>
@@ -644,6 +680,98 @@
     background: rgba(201, 168, 76, 0.25);
     border-color: #c9a84c;
   }
+
+  /* ── Exit confirmation ── */
+  .exit-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+  }
+
+  .exit-dialog {
+    background: rgba(18, 18, 26, 0.98);
+    border: 1px solid rgba(201, 168, 76, 0.3);
+    border-radius: 16px;
+    padding: 36px 40px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    max-width: 360px;
+  }
+
+  .exit-dialog h3 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #f0e8d8;
+    margin: 0;
+  }
+
+  .exit-dialog p {
+    font-size: 14px;
+    color: rgba(232, 224, 208, 0.5);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .exit-actions {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .exit-btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+
+  .exit-btn.cancel {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    color: rgba(232, 224, 208, 0.6);
+  }
+
+  .exit-btn.cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f0e8d8;
+  }
+
+  .exit-btn.confirm {
+    background: rgba(200, 60, 60, 0.15);
+    border: 1.5px solid rgba(200, 60, 60, 0.4);
+    color: #e07070;
+  }
+
+  .exit-btn.confirm:hover {
+    background: rgba(200, 60, 60, 0.25);
+    border-color: #e07070;
+  }
+
+  .back-link {
+    margin-top: 4px;
+    background: none;
+    border: none;
+    color: rgba(232, 224, 208, 0.35);
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 6px 12px;
+    transition: color 0.2s;
+  }
+  .back-link:hover { color: rgba(201, 168, 76, 0.7); }
 
   /* ── Boundary toast ── */
   .boundary-toast {
