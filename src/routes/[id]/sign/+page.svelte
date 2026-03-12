@@ -25,9 +25,10 @@
   let lastX = 0;
   let lastY = 0;
 
-  // 16ms draw throttle
-  let lastDrawSent = 0;
-  const DRAW_INTERVAL = 16;
+  // 드로잉 배치 전송 (50ms 간격으로 포인트 묶어서 전송)
+  let drawBatch = [];
+  let batchTimer = null;
+  const BATCH_INTERVAL = 50;
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const signatories = $derived(activeProject?.signatories ?? []);
@@ -94,6 +95,20 @@
   }
 
   // ── Drawing ───────────────────────────────────────────────────────────────
+  function flushDrawBatch() {
+    if (drawBatch.length === 0) return;
+    wsStore.send({ type: 'draw_batch', signId: session.data.signId, points: drawBatch });
+    drawBatch = [];
+  }
+
+  function scheduleBatchFlush() {
+    if (batchTimer) return;
+    batchTimer = setTimeout(() => {
+      batchTimer = null;
+      flushDrawBatch();
+    }, BATCH_INTERVAL);
+  }
+
   function onPointerDown(e) {
     if (!isMyTurn || !canvasEl) return;
     e.preventDefault();
@@ -106,6 +121,8 @@
     ctx?.moveTo(lastX, lastY);
     const x = e.offsetX / canvasEl.clientWidth;
     const y = e.offsetY / canvasEl.clientHeight;
+    // start는 즉시 전송 (배치에 넣지 않음)
+    flushDrawBatch();
     wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'start' });
   }
 
@@ -124,19 +141,20 @@
     lastX = px;
     lastY = py;
 
-    // WS 전송은 16ms(~60fps) 스로틀
-    const now = Date.now();
-    if (now - lastDrawSent >= DRAW_INTERVAL) {
-      const x = e.offsetX / canvasEl.clientWidth;
-      const y = e.offsetY / canvasEl.clientHeight;
-      wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'move' });
-      lastDrawSent = now;
-    }
+    // 포인트를 배치에 누적, 50ms마다 묶어서 전송
+    const x = e.offsetX / canvasEl.clientWidth;
+    const y = e.offsetY / canvasEl.clientHeight;
+    drawBatch.push({ x, y });
+    scheduleBatchFlush();
   }
 
   function onPointerUp(e) {
     if (!isDrawing) return;
     isDrawing = false;
+    // 남은 배치 즉시 전송 후 end
+    flushDrawBatch();
+    clearTimeout(batchTimer);
+    batchTimer = null;
     const x = e.offsetX / canvasEl.clientWidth;
     const y = e.offsetY / canvasEl.clientHeight;
     wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'end' });
@@ -145,12 +163,31 @@
   function clearSignature() {
     if (!canvasEl) return;
     canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
-    wsStore.send({ type: 'sign_clear', signId: session.data.signId });
+    retrySend({ type: 'sign_clear', signId: session.data.signId });
   }
 
-  function completeSignature() {
-    wsStore.send({ type: 'sign_done', signId: session.data.signId });
+  async function completeSignature() {
+    // 1. WS로 완료 알림 (재시도 포함)
+    retrySend({ type: 'sign_done', signId: session.data.signId });
+    // 2. 서명 이미지를 직접 서버에 저장 (display 유실 대비 백업)
+    if (canvasEl && activeProject) {
+      const dataUrl = canvasEl.toDataURL('image/png');
+      try {
+        await fetch(`${API_BASE}/api/projects/${activeProject.id}/signatures`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signId: session.data.signId, dataUrl }),
+        });
+      } catch {}
+    }
     signDone = true;
+  }
+
+  /** 중요 메시지 재시도 (최대 3회) */
+  function retrySend(data, attempts = 3) {
+    if (wsStore.send(data)) return;
+    if (attempts <= 1) return;
+    setTimeout(() => retrySend(data, attempts - 1), 1000);
   }
 
   // ── WebSocket handlers ────────────────────────────────────────────────────

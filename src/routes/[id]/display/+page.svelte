@@ -105,9 +105,38 @@
         ctx.lineTo(px, py);
         ctx.stroke();
         drawingState[msg.signId] = { lastX: px, lastY: py };
+      } else {
+        // start 메시지 유실된 경우 — 첫 move를 start로 처리
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        drawingState[msg.signId] = { lastX: px, lastY: py };
       }
     } else if (msg.action === 'end') {
       drawingState[msg.signId] = null;
+    }
+  }
+
+  function handleDrawBatch(msg) {
+    const sig = project?.signatories?.find(s => s.id === msg.signId);
+    if (!sig) return;
+    const canvas = canvasRefs[msg.signId];
+    if (!canvas) return;
+    const ctx = getCtx(sig);
+    if (!ctx) return;
+    const points = msg.points;
+    if (!points?.length) return;
+
+    for (const pt of points) {
+      const px = pt.x * canvas.width;
+      const py = pt.y * canvas.height;
+      const prev = drawingState[msg.signId];
+      if (prev) {
+        ctx.beginPath();
+        ctx.moveTo(prev.lastX, prev.lastY);
+        ctx.lineTo(px, py);
+        ctx.stroke();
+      }
+      drawingState[msg.signId] = { lastX: px, lastY: py };
     }
   }
 
@@ -357,6 +386,7 @@
     }));
 
     unsubs.push(wsStore.on('draw', handleDraw));
+    unsubs.push(wsStore.on('draw_batch', handleDrawBatch));
 
     unsubs.push(wsStore.on('sign_done', (msg) => {
       saveSignatureToServer(msg.signId);

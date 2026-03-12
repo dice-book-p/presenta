@@ -218,6 +218,14 @@ export function createWebSocketServer(server) {
           break;
         }
 
+        // ── 그리기 배치 (태블릿만) ──────────────────────────────────────────
+        case 'draw_batch': {
+          if (ws.role !== 'tablet') return;
+          if (!Array.isArray(msg.points)) return;
+          sendToMain(ws.projectId, { type: 'draw_batch', signId: ws.signId, points: msg.points });
+          break;
+        }
+
         // ── 서명 완료 (태블릿만) ─────────────────────────────────────────────
         case 'sign_done': {
           if (ws.role !== 'tablet') return;
