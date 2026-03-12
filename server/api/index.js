@@ -151,7 +151,7 @@ async function uploadSlideHandler({ req, res, params }) {
   let tooLarge = false;
 
   await new Promise((resolve) => {
-    const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_SLIDE_BYTES } });
+    const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_SLIDE_BYTES }, defParamCharset: 'utf8' });
     busboy.on('file', (_field, stream, info) => {
       const chunks = [];
       stream.on('data', chunk => chunks.push(chunk));

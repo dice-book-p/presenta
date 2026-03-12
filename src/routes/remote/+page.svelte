@@ -47,11 +47,15 @@
 
     unsubs.push(wsStore.on('rejected', (msg) => {
       rejected = true;
-      if (msg.reason === 'no_active_project') {
+      if (msg.reason === 'no_active_project' || msg.reason === 'project_not_active') {
         noProject = true;
         rejectReason = '';
+      } else if (msg.reason === 'project_not_found') {
+        rejectReason = '프로젝트를 찾을 수 없습니다.';
       } else if (msg.reason === 'invalid_token') {
         rejectReason = '유효하지 않은 접근 토큰입니다.';
+      } else if (msg.reason === 'invalid_pin') {
+        rejectReason = 'PIN이 올바르지 않습니다.';
       } else {
         rejectReason = '연결이 거부되었습니다.';
       }

@@ -284,11 +284,17 @@
 
     unsubs.push(wsStore.on('rejected', (msg) => {
       rejected = true;
-      if (msg.reason === 'no_active_project') {
+      if (msg.reason === 'no_active_project' || msg.reason === 'project_not_active') {
         noProject = true;
         rejectReason = '';
-      } else if (msg.reason === 'display_occupied') {
+      } else if (msg.reason === 'project_not_found') {
+        rejectReason = '프로젝트를 찾을 수 없습니다.';
+      } else if (msg.reason === 'display_occupied' || msg.reason === 'main_display_occupied') {
         rejectReason = '이미 다른 슬라이드쇼 화면이 연결되어 있습니다.';
+      } else if (msg.reason === 'invalid_pin') {
+        rejectReason = 'PIN이 올바르지 않습니다.';
+      } else if (msg.reason === 'missing_project_id') {
+        rejectReason = '프로젝트 ID가 없습니다. 관리자 화면에서 접속해주세요.';
       } else {
         rejectReason = '연결이 거부되었습니다.';
       }

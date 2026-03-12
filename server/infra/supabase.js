@@ -13,6 +13,9 @@ let adapter;
 if (process.env.SUPABASE_URL) {
   adapter = await import('./supabase-adapter.js');
   console.log('[storage] using Supabase (DB + Storage)');
+} else if (process.env.NODE_ENV === 'production') {
+  console.error('[storage] FATAL: SUPABASE_URL is required in production');
+  process.exit(1);
 } else {
   adapter = await import('./local-storage.js');
   console.log('[storage] using local filesystem (data/ & uploads/)');

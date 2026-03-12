@@ -160,10 +160,14 @@
     wsCleanups.push(wsStore.on('rejected', (msg) => {
       const reason = msg.reason === 'tablet_occupied'
         ? '이미 해당 서명자로 다른 기기가 연결되어 있습니다.'
-        : msg.reason === 'no_active_project'
+        : (msg.reason === 'no_active_project' || msg.reason === 'project_not_active')
         ? '활성 프로젝트가 없습니다. 관리자에게 문의해주세요.'
+        : msg.reason === 'project_not_found'
+        ? '프로젝트를 찾을 수 없습니다.'
         : msg.reason === 'invalid_signatory'
         ? '유효하지 않은 서명자입니다. 다시 선택해주세요.'
+        : msg.reason === 'invalid_pin'
+        ? 'PIN이 올바르지 않습니다.'
         : '연결이 거부되었습니다.';
       session.clear();
       wsStore.disconnect();
