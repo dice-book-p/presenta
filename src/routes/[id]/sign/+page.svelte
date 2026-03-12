@@ -212,10 +212,21 @@
     }
   });
 
+  // ── QR 코드 ──────────────────────────────────────────────────────────────
+  let signQr = $state('');
+
+  async function generateQr() {
+    const QRCode = await import('qrcode');
+    signQr = await QRCode.default.toDataURL(window.location.href, {
+      width: 180, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
+    });
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   onMount(async () => {
     setupHandlers();
     await loadActiveProject();
+    generateQr();
 
     // 초기 연결 상태 조회
     try {
@@ -300,6 +311,16 @@
               {/if}
             </button>
           {/each}
+        </div>
+      {/if}
+
+      <!-- QR 코드: 다른 기기에서 이 페이지 접속 -->
+      {#if signQr && activeProject}
+        <div class="qr-section">
+          <div class="qr-divider"></div>
+          <p class="qr-label">다른 기기에서 접속</p>
+          <img class="qr-img" src={signQr} alt="서명 페이지 QR" />
+          <p class="qr-hint">QR 코드를 스캔하면 이 페이지에 바로 접속할 수 있습니다</p>
         </div>
       {/if}
     </div>
@@ -722,6 +743,42 @@
   }
 
   .gold-btn:hover { background: rgba(201, 168, 76, 0.25); border-color: #c9a84c; }
+
+  /* ── QR section ── */
+  .qr-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .qr-divider {
+    width: 60px;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin-bottom: 4px;
+  }
+
+  .qr-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(232, 224, 208, 0.5);
+    margin: 0;
+  }
+
+  .qr-img {
+    width: 140px;
+    height: 140px;
+    border-radius: 10px;
+    border: 1px solid rgba(201, 168, 76, 0.2);
+  }
+
+  .qr-hint {
+    font-size: 12px;
+    color: rgba(232, 224, 208, 0.3);
+    margin: 0;
+    text-align: center;
+  }
 
   .back-link {
     margin-top: 4px;
