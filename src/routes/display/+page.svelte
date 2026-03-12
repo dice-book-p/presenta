@@ -158,6 +158,7 @@
   let loopMode = $state(false);        // 반복 모드
   let autoPlay = $state(false);        // 자동 넘김
   let autoPlayInterval = $state(5);    // 자동 넘김 간격 (초)
+  let showSlideNumber = $state(false); // 슬라이드 번호 표시
   let autoPlayTimer = null;
   let boundaryToast = $state('');       // 경계 안내 메시지
   let boundaryToastTimer = null;
@@ -253,6 +254,7 @@
     loopMode = !!ss.loop;
     autoPlay = !!ss.autoPlay;
     autoPlayInterval = Math.max(1, ss.autoPlaySec ?? 5);
+    showSlideNumber = !!ss.showSlideNumber;
   }
 
   onMount(() => {
@@ -419,11 +421,13 @@
     {/if}
 
     <!-- 슬라이드 카운터 -->
-    <div class="slide-counter">
-      {currentSlide + 1} / {sortedSlides.length}
-      {#if loopMode}<span class="mode-badge">반복</span>{/if}
-      {#if autoPlay}<span class="mode-badge">자동 {autoPlayInterval}초</span>{/if}
-    </div>
+    {#if showSlideNumber}
+      <div class="slide-counter">
+        {currentSlide + 1} / {sortedSlides.length}
+        {#if loopMode}<span class="mode-badge">반복</span>{/if}
+        {#if autoPlay}<span class="mode-badge">자동 {autoPlayInterval}초</span>{/if}
+      </div>
+    {/if}
 
     <!-- 이전/다음 버튼 -->
     <button

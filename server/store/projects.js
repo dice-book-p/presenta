@@ -36,7 +36,8 @@ export async function initProjectsStore() {
     // Migration: 절대 URL → 상대경로 변환 (localhost:PORT/uploads/... → /uploads/...)
     let migrated = false;
     for (const p of store.projects) {
-      if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5 }; migrated = true; }
+      if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false }; migrated = true; }
+      if (p.slideshow && p.slideshow.showSlideNumber === undefined) { p.slideshow.showSlideNumber = false; migrated = true; }
       for (const s of (p.slides ?? [])) {
         if (s.url && /^https?:\/\/[^/]+\/uploads\//.test(s.url)) {
           s.url = s.url.replace(/^https?:\/\/[^/]+/, '');
@@ -128,7 +129,7 @@ export function createProject(name) {
     signatories: [],
     pin: '',
     remoteToken: '',
-    slideshow: { loop: false, autoPlay: false, autoPlaySec: 5 },
+    slideshow: { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false },
   };
   store.projects.push(project);
   persist();

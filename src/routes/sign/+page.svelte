@@ -53,8 +53,12 @@
       const res = await fetch(`${API_BASE}/api/active`);
       if (!res.ok) { loadError = '서버에 연결할 수 없습니다.'; return; }
       const data = await res.json();
-      if (!data?.id) { loadError = ''; activeProject = null; return; }
-      activeProject = data;
+      // /api/active returns an array of active projects
+      const list = Array.isArray(data) ? data : [];
+      if (list.length === 0) { loadError = ''; activeProject = null; return; }
+      // Match by ?p=projectId, or fall back to first active project
+      const matched = projectId ? list.find(p => p.id === projectId) : null;
+      activeProject = matched ?? list[0];
       loadError = '';
     } catch {
       loadError = '서버에 연결할 수 없습니다.';

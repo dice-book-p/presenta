@@ -39,6 +39,24 @@
   }
 
   async function restoreNavState() {
+    // URL param 우선 확인
+    const urlProjectId = new URLSearchParams(window.location.search).get('p');
+    if (urlProjectId) {
+      const p = projects.find(pr => pr.id === urlProjectId);
+      if (p) {
+        await openProject(p);
+        // sessionStorage에 탭 정보가 있으면 복원
+        const raw = sessionStorage.getItem(SS_STATE);
+        if (raw) {
+          try {
+            const { tab } = JSON.parse(raw);
+            if (tab && tab !== 'slides') await changeTab(tab);
+          } catch {}
+        }
+        return;
+      }
+    }
+    // fallback: sessionStorage
     const raw = sessionStorage.getItem(SS_STATE);
     if (!raw) return;
     try {
@@ -99,6 +117,18 @@
     const base = window.location.origin;
     const QRCode = await import('qrcode');
     remoteQr = await QRCode.default.toDataURL(`${base}/remote?p=${selectedProject.id}&t=${remoteToken}`, {
+      width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
+    });
+  }
+
+  // ── Sign QR ───────────────────────────────────────────────────────────────
+  let signQr = $state('');
+
+  async function loadSignQr() {
+    if (!selectedProject) return;
+    const base = window.location.origin;
+    const QRCode = await import('qrcode');
+    signQr = await QRCode.default.toDataURL(`${base}/sign?p=${selectedProject.id}`, {
       width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
     });
   }
@@ -253,6 +283,11 @@
   let startPct   = null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  function clearUrlParam() {
+    const url = new URL(window.location);
+    url.searchParams.delete('p');
+    history.replaceState(null, '', url);
+  }
   function flash(m, e) { msg = m || ''; err = e || ''; setTimeout(() => { msg = ''; err = ''; }, 3000); }
   function sorted(slides) { return [...(slides || [])].sort((a, b) => a.order - b.order); }
 
@@ -386,6 +421,10 @@
     sidebarOpen = false;
     showGuide = false;
     await loadProject(p.id);
+    // URL에 프로젝트 ID 반영
+    const url = new URL(window.location);
+    url.searchParams.set('p', p.id);
+    history.replaceState(null, '', url);
     saveNavState();
   }
 
@@ -747,7 +786,8 @@
     if (tab === 'connections') {
       await loadConnStatus();
       remoteQr = '';  // 프로젝트 변경 시 QR 초기화
-      await loadRemoteQr();
+      signQr = '';
+      await Promise.all([loadRemoteQr(), loadSignQr()]);
     }
     if (tab === 'settings') await loadProjectPin();
     saveNavState();
@@ -790,6 +830,12 @@
   function toggleSlideshowAutoPlay() {
     const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
     ss.autoPlay = !ss.autoPlay;
+    saveSlideshowSettings(ss);
+  }
+
+  function toggleSlideNumber() {
+    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false }) };
+    ss.showSlideNumber = !ss.showSlideNumber;
     saveSlideshowSettings(ss);
   }
 
@@ -907,7 +953,7 @@
         <div class="sidebar-spacer"></div>
         <div class="sidebar-bottom">
           <button class="sidebar-guide-btn" class:active={showGuide}
-            onclick={() => { selectedProject = null; editSig = null; showGuide = true; }}>
+            onclick={() => { selectedProject = null; editSig = null; showGuide = true; clearUrlParam(); }}>
             📖 사용 가이드
           </button>
         </div>
@@ -930,7 +976,7 @@
 
         <div class="topbar-breadcrumb">
           {#if selectedProject}
-            <span class="topbar-bc-link" onclick={() => { selectedProject = null; editSig = null; showGuide = false; }}>프로젝트</span>
+            <span class="topbar-bc-link" onclick={() => { selectedProject = null; editSig = null; showGuide = false; clearUrlParam(); }}>프로젝트</span>
             <span class="topbar-bc-sep">/</span>
             {#if editingName}
               <input class="name-edit-input" bind:value={nameInput}
@@ -1077,7 +1123,8 @@
                       <li>슬라이드쇼 PC: <strong>슬라이드쇼</strong> 버튼 클릭</li>
                       <li>각 서명자 태블릿: <strong>서명</strong> 버튼 클릭 → 본인 이름 선택</li>
                     </ul>
-                    <strong>연결현황 탭</strong>에서 각 기기의 연결 상태를 실시간으로 확인할 수 있습니다.
+                    <strong>연결현황 탭</strong>에서 각 기기의 연결 상태를 실시간으로 확인할 수 있습니다.<br>
+                    <span class="guide-tip">💡 연결현황 탭의 QR 코드를 스캔하면 서명자 화면이나 리모컨에 바로 접속할 수 있습니다.</span>
                   </div>
                 </div>
               </div>
@@ -1089,6 +1136,31 @@
                     서명자가 태블릿에서 서명하면 자동으로 슬라이드쇼 화면에 반영됩니다.<br>
                     개인 슬라이드 → 해당 서명자 서명이 지정 위치에 표시<br>
                     종합 슬라이드 → 모든 서명자 서명이 합쳐져 표시
+                  </div>
+                </div>
+              </div>
+              <div class="guide-step">
+                <div class="guide-step-num">3</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">슬라이드쇼 모드 설정</div>
+                  <div class="guide-step-desc">
+                    <strong>설정 탭 → 슬라이드쇼 모드</strong>에서 재생 방식을 조정합니다.<br>
+                    <ul class="guide-list">
+                      <li><strong>반복 모드</strong>: 마지막 슬라이드 이후 첫 슬라이드로 순환</li>
+                      <li><strong>자동 넘김</strong>: 설정된 간격(초)으로 자동 전환</li>
+                      <li><strong>슬라이드 번호 표시</strong>: 하단에 현재 슬라이드 번호 표시</li>
+                    </ul>
+                    <span class="guide-tip">💡 슬라이드쇼 화면에서 단축키 사용 가능: Space/화살표(넘기기), F(전체화면), L(반복), A(자동)</span>
+                  </div>
+                </div>
+              </div>
+              <div class="guide-step">
+                <div class="guide-step-num">4</div>
+                <div class="guide-step-body">
+                  <div class="guide-step-title">모바일 리모컨</div>
+                  <div class="guide-step-desc">
+                    <strong>연결현황 탭</strong>의 리모컨 QR 코드를 스마트폰으로 스캔하면 슬라이드를 원격 조작할 수 있습니다.<br>
+                    <span class="guide-tip">💡 리모컨은 슬라이드 이전/다음 이동을 지원합니다.</span>
                   </div>
                 </div>
               </div>
@@ -1465,21 +1537,38 @@
               </div>
             {/if}
 
-            <!-- 리모컨 QR -->
+            <!-- QR 코드 섹션 -->
             <div class="remote-qr-section">
-              <div class="section-sub-title">📱 모바일 리모컨</div>
-              <p class="helper-text">이 QR 코드를 스캔하면 스마트폰으로 슬라이드를 조작할 수 있습니다.</p>
-              {#if remoteQr}
-                <div class="qr-grid">
+              <div class="section-sub-title">📱 QR 코드</div>
+              <p class="helper-text">QR 코드를 스캔하여 각 기기에서 바로 접속할 수 있습니다.</p>
+              <div class="qr-grid">
+                <!-- 서명 QR -->
+                {#if signQr}
+                  <div class="qr-card">
+                    <div class="qr-card-label">서명자 화면</div>
+                    <img class="qr-img" src={signQr} alt="서명 QR" />
+                    <code class="qr-url">/sign?p={selectedProject?.id?.slice(0, 8)}···</code>
+                  </div>
+                {:else}
+                  <div class="qr-card">
+                    <div class="qr-card-label">서명자 화면</div>
+                    <button class="btn-outline btn-sm" onclick={loadSignQr}>QR 생성</button>
+                  </div>
+                {/if}
+                <!-- 리모컨 QR -->
+                {#if remoteQr}
                   <div class="qr-card">
                     <div class="qr-card-label">슬라이드 리모컨</div>
                     <img class="qr-img" src={remoteQr} alt="리모컨 QR" />
                     <code class="qr-url">/remote?t=···</code>
                   </div>
-                </div>
-              {:else}
-                <button class="btn-outline btn-sm" onclick={loadRemoteQr}>QR 생성</button>
-              {/if}
+                {:else}
+                  <div class="qr-card">
+                    <div class="qr-card-label">슬라이드 리모컨</div>
+                    <button class="btn-outline btn-sm" onclick={loadRemoteQr}>QR 생성</button>
+                  </div>
+                {/if}
+              </div>
             </div>
 
           </div>
@@ -1582,6 +1671,17 @@
                     </div>
                   </div>
                 {/if}
+
+                <label class="toggle-row">
+                  <span class="toggle-label">
+                    <strong>슬라이드 번호 표시</strong>
+                    <span class="toggle-desc">슬라이드쇼 화면 하단에 현재 번호를 표시합니다</span>
+                  </span>
+                  <button class="toggle-switch" class:on={selectedProject?.slideshow?.showSlideNumber}
+                    onclick={toggleSlideNumber}>
+                    <span class="toggle-knob"></span>
+                  </button>
+                </label>
               </div>
 
               <p class="helper-text" style="margin-top:12px;font-size:11px">
@@ -1659,8 +1759,8 @@
   .sidebar-group { padding: 8px 0; }
   .sidebar-group-header { display: flex; align-items: center; justify-content: space-between;
     padding: 4px 18px 6px; }
-  .sidebar-group-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.5); letter-spacing: .1em; text-transform: uppercase; }
-  .sidebar-group-label--project { display: block; padding: 4px 18px 8px; font-size: 11px; color: rgba(232,224,208,.5);
+  .sidebar-group-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.65); letter-spacing: .1em; text-transform: uppercase; }
+  .sidebar-group-label--project { display: block; padding: 4px 18px 8px; font-size: 11px; color: rgba(232,224,208,.65);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sidebar-add-btn { width: 20px; height: 20px; background: rgba(201,168,76,.1); border: 1px solid rgba(201,168,76,.2);
     border-radius: 4px; color: #c9a84c; font-size: 14px; line-height: 1; cursor: pointer;
@@ -1675,7 +1775,7 @@
 
   .project-list { display: flex; flex-direction: column; }
   .project-list-item { display: flex; align-items: center; gap: 8px; padding: 8px 18px;
-    background: none; border: none; color: rgba(232,224,208,.75); font-size: 13px; font-family: inherit;
+    background: none; border: none; color: rgba(232,224,208,.85); font-size: 13px; font-family: inherit;
     text-align: left; cursor: pointer; transition: all .15s; width: 100%; }
   .project-list-item:hover { background: rgba(255,255,255,.04); color: #f0e8d8; }
   .project-list-item.selected { background: rgba(201,168,76,.08); color: #f0e8d8; }
@@ -1735,7 +1835,7 @@
   .section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .section-header-actions { display: flex; gap: 8px; }
   .section-title { font-size: 18px; font-weight: 700; color: #f0e8d8; margin: 0; }
-  .helper-text { font-size: 12px; color: rgba(232,224,208,.6); margin: 0; }
+  .helper-text { font-size: 12px; color: rgba(232,224,208,.65); margin: 0; }
   .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px;
     padding: 40px 20px; text-align: center; color: rgba(232,224,208,.5); font-size: 14px;
     border: 1px dashed rgba(255,255,255,.08); border-radius: 12px; }
@@ -1755,8 +1855,8 @@
   .project-card-body { padding: 16px 20px; cursor: pointer; }
   .project-card-body:hover { background: rgba(255,255,255,.02); }
   .project-card-name { font-size: 15px; font-weight: 600; color: #f0e8d8; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-  .project-card-meta { font-size: 13px; color: rgba(232,224,208,.7); }
-  .project-card-date { font-size: 12px; color: rgba(232,224,208,.45); margin-top: 4px; }
+  .project-card-meta { font-size: 13px; color: rgba(232,224,208,.8); }
+  .project-card-date { font-size: 12px; color: rgba(232,224,208,.55); margin-top: 4px; }
   .project-card-actions { display: flex; gap: 8px; padding: 10px 16px;
     border-top: 1px solid rgba(255,255,255,.05); background: rgba(0,0,0,.1); }
 
@@ -1793,7 +1893,7 @@
   .select-input:focus { border-color: rgba(201,168,76,.4); }
   .select-input-inline { max-width: 240px; }
   .field-row { display: flex; align-items: center; gap: 12px; }
-  .field-label { font-size: 12px; font-weight: 600; color: rgba(232,224,208,.7); letter-spacing: .05em; white-space: nowrap; }
+  .field-label { font-size: 12px; font-weight: 600; color: rgba(232,224,208,.8); letter-spacing: .05em; white-space: nowrap; }
 
   /* ── Slides ── */
   .upload-btn { cursor: pointer; }
@@ -1830,7 +1930,7 @@
   /* ── Signatory form ── */
   .form-card { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.1);
     border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-  .form-section-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.65);
+  .form-section-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.75);
     letter-spacing: .12em; text-transform: uppercase; padding-bottom: 8px;
     border-bottom: 1px solid rgba(255,255,255,.05); }
   .form-row-2 { display: flex; gap: 12px; }
@@ -1911,10 +2011,10 @@
   .conn-dot.on { background: #c9a84c; box-shadow: 0 0 6px rgba(201,168,76,.4); }
   .conn-info { flex: 1; }
   .conn-label { font-size: 14px; font-weight: 600; color: #f0e8d8; }
-  .conn-sub { font-size: 12px; color: rgba(232,224,208,.65); }
+  .conn-sub { font-size: 12px; color: rgba(232,224,208,.7); }
 
   /* ── Remote QR section ── */
-  .section-sub-title { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.7); margin-bottom: 4px; }
+  .section-sub-title { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.85); margin-bottom: 4px; }
   .remote-qr-section { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
 
   /* ── QR ── */
