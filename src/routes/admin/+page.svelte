@@ -980,8 +980,8 @@
     <!-- ── Sidebar ── -->
     <aside class="sidebar" class:open={sidebarOpen}>
       <div class="sidebar-inner">
-        <!-- Brand -->
-        <div class="sidebar-brand">
+        <!-- Brand (클릭 시 관리자 홈) -->
+        <div class="sidebar-brand" onclick={() => { selectedProject = null; editSig = null; showGuide = false; clearUrlParam(); }} role="button" tabindex="0">
           <div class="brand-logo">Presenta</div>
           <div class="brand-sub">관리자</div>
         </div>
@@ -1848,7 +1848,7 @@
     display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
   .sidebar-inner { display: flex; flex-direction: column; padding: 20px 0 40px; min-height: 100%; }
 
-  .sidebar-brand { padding: 0 18px 20px; border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 8px; }
+  .sidebar-brand { padding: 0 18px 20px; border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 8px; cursor: pointer; }
   .brand-logo { display: inline-block; padding: 4px 12px; border: 1px solid rgba(201,168,76,.4); border-radius: 20px;
     color: #c9a84c; font-size: 11px; font-weight: 700; letter-spacing: .12em; background: rgba(201,168,76,.07); }
   .brand-sub { font-size: 11px; color: rgba(232,224,208,.5); margin-top: 6px; padding-left: 2px; letter-spacing: .04em; }
