@@ -3,6 +3,7 @@
   import { API_BASE } from '$lib/config.js';
 
   // ── Auth ───────────────────────────────────────────────────────────────────
+  let authChecking = $state(true);   // 자동 로그인 확인 중 (깜빡임 방지)
   let pinView   = $state(true);
   let pinInput  = $state('');
   let pinError  = $state('');
@@ -55,7 +56,7 @@
   // onMount: 저장된 토큰으로 자동 로그인 시도
   onMount(async () => {
     const saved = sessionStorage.getItem(SS_TOKEN);
-    if (!saved) return;
+    if (!saved) { authChecking = false; return; }
     token = saved;
     const ok = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() })
       .then(r => r.ok).catch(() => false);
@@ -69,6 +70,7 @@
       sessionStorage.removeItem(SS_TOKEN);
       sessionStorage.removeItem(SS_STATE);
     }
+    authChecking = false;
   });
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -78,7 +80,7 @@
 
   // ── Data ───────────────────────────────────────────────────────────────────
   let projects        = $state([]);
-  let activeProjectId = $state(null);
+  let activeProjectIds = $state([]);
   let loading         = $state(false);
   let msg             = $state('');
   let err             = $state('');
@@ -90,13 +92,14 @@
   let remoteQr = $state('');
 
   async function loadRemoteQr() {
-    const r = await fetch(`${API_BASE}/api/remote-token`, { headers: authHeaders() });
+    if (!selectedProject) return;
+    const r = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/remote-token`, { headers: authHeaders() });
     if (!r.ok) return;
     const { token: remoteToken } = await r.json();
     const base = window.location.origin;
     const QRCode = await import('qrcode');
-    remoteQr = await QRCode.default.toDataURL(`${base}/remote?t=${remoteToken}`, {
-      width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0a0a0f' }
+    remoteQr = await QRCode.default.toDataURL(`${base}/remote?p=${selectedProject.id}&t=${remoteToken}`, {
+      width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
     });
   }
 
@@ -255,27 +258,40 @@
 
   // ── API calls ──────────────────────────────────────────────────────────────
   async function loadAll() {
-    const [pr, ar] = await Promise.all([
-      fetch(`${API_BASE}/api/projects`).then(r => r.json()),
-      fetch(`${API_BASE}/api/active`).then(r => r.json()),
-    ]);
-    projects = pr;
-    activeProjectId = ar?.id ?? null;
+    try {
+      const [pr, ar] = await Promise.all([
+        fetch(`${API_BASE}/api/projects`).then(r => r.ok ? r.json() : []),
+        fetch(`${API_BASE}/api/active`).then(r => r.ok ? r.json() : []),
+      ]);
+      projects = Array.isArray(pr) ? pr : [];
+      activeProjectIds = Array.isArray(ar) ? ar.map(p => p?.id).filter(Boolean) : [];
+    } catch {
+      flash('', '프로젝트 목록 로드 실패');
+    }
   }
 
   async function loadProject(id) {
-    const p = await fetch(`${API_BASE}/api/projects/${id}`).then(r => r.json());
-    selectedProject = p;
-    if (activeTab === 'signatures') await loadSignatures();
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${id}`);
+      if (!r.ok) { flash('', '프로젝트 로드 실패'); return; }
+      selectedProject = await r.json();
+      if (activeTab === 'signatures') await loadSignatures();
+    } catch {
+      flash('', '프로젝트 로드 실패');
+    }
   }
 
   async function loadSignatures() {
     if (!selectedProject) return;
-    signatures = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/signatures`).then(r => r.json());
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/signatures`);
+      signatures = r.ok ? await r.json() : {};
+    } catch { signatures = {}; }
   }
 
   async function loadConnStatus() {
-    connStatus = await fetch(`${API_BASE}/api/status`).then(r => r.json()).catch(() => null);
+    if (!selectedProject) { connStatus = null; return; }
+    connStatus = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/status`).then(r => r.json()).catch(() => null);
   }
 
   function startConnPoll() {
@@ -296,41 +312,70 @@
 
   // ── Project operations ─────────────────────────────────────────────────────
   let newProjectName = $state('');
+  let newProjectPin  = $state('');
   let showNewProject = $state(false);
 
   async function createProject() {
     if (!newProjectName.trim()) return;
     loading = true;
-    const r = await apiPost('/api/projects', { name: newProjectName.trim() });
-    if (r.ok) { newProjectName = ''; showNewProject = false; await loadAll(); flash('프로젝트가 생성되었습니다.'); }
-    else flash('', '프로젝트 생성 실패');
+    try {
+      const r = await apiPost('/api/projects', { name: newProjectName.trim() });
+      if (!r.ok) { flash('', '프로젝트 생성 실패'); loading = false; return; }
+      const created = await r.json();
+      // PIN 설정이 있으면 별도로 저장
+      if (newProjectPin.trim()) {
+        const pinR = await apiPut(`/api/projects/${created.id}/pin`, { pin: newProjectPin.trim() });
+        if (!pinR.ok) flash('', 'PIN 설정 실패 — 설정 탭에서 다시 시도해주세요.');
+      }
+      newProjectName = ''; newProjectPin = ''; showNewProject = false;
+      await loadAll();
+      flash('프로젝트가 생성되었습니다.');
+    } catch {
+      flash('', '프로젝트 생성 중 오류 발생');
+    }
     loading = false;
   }
 
-  async function activateProject(id) {
+  function isActive(id) { return activeProjectIds.includes(id); }
+
+  async function toggleActive(id) {
     loading = true;
-    const r = await apiPost('/api/active', { projectId: id });
-    if (r.ok) { activeProjectId = id; flash('활성 프로젝트가 변경되었습니다.'); }
-    else flash('', '활성화 실패');
+    try {
+      const active = !isActive(id);
+      const r = await apiPost('/api/active', { projectId: id, active });
+      if (r.ok) {
+        if (active) activeProjectIds = [...activeProjectIds, id];
+        else activeProjectIds = activeProjectIds.filter(x => x !== id);
+        flash(active ? '프로젝트가 활성화되었습니다.' : '프로젝트가 비활성화되었습니다.');
+      } else flash('', '변경 실패');
+    } catch { flash('', '서버 연결 실패'); }
     loading = false;
   }
 
   async function duplicateProject(id) {
     loading = true;
-    const r = await apiPost(`/api/projects/${id}/duplicate`, {});
-    if (r.ok) { await loadAll(); flash('복제되었습니다.'); }
-    else flash('', '복제 실패');
+    try {
+      const r = await apiPost(`/api/projects/${id}/duplicate`, {});
+      if (r.ok) { await loadAll(); flash('복제되었습니다.'); }
+      else flash('', '복제 실패');
+    } catch { flash('', '서버 연결 실패'); }
     loading = false;
   }
 
   async function deleteProject(id) {
     if (!confirm('프로젝트를 삭제하면 모든 슬라이드와 서명자 설정이 삭제됩니다. 계속하시겠습니까?')) return;
     loading = true;
-    const r = await apiDelete(`/api/projects/${id}`);
-    if (r.ok) {
-      if (selectedProject?.id === id) { selectedProject = null; }
-      await loadAll(); flash('삭제되었습니다.');
-    } else flash('', '삭제 실패');
+    try {
+      const r = await apiDelete(`/api/projects/${id}`);
+      if (r.ok) {
+        if (selectedProject?.id === id) {
+          selectedProject = null;
+          activeTab = 'slides';
+          editSig = null;
+        }
+        await loadAll(); flash('삭제되었습니다.');
+      } else flash('', '삭제 실패');
+    } catch { flash('', '삭제 중 오류 발생'); }
     loading = false;
   }
 
@@ -350,19 +395,25 @@
 
   async function saveProjectName(newName) {
     if (!newName?.trim() || !selectedProject) return;
-    const r = await apiPut(`/api/projects/${selectedProject.id}`, { name: newName.trim() });
-    if (r.ok) { selectedProject = await r.json(); await loadAll(); }
+    try {
+      const r = await apiPut(`/api/projects/${selectedProject.id}`, { name: newName.trim() });
+      if (r.ok) { selectedProject = await r.json(); await loadAll(); }
+      else flash('', '이름 변경 실패');
+    } catch { flash('', '서버 연결 실패'); }
   }
 
   // ── Slide operations ───────────────────────────────────────────────────────
   async function processAndUpload(file) {
     const idx = uploadFiles.findIndex(f => f.name === file.name);
+    if (idx < 0) return;
     uploadFiles[idx] = { ...uploadFiles[idx], status: 'uploading' };
+    const projectId = selectedProject?.id;
+    if (!projectId) { uploadFiles[idx] = { ...uploadFiles[idx], status: 'error', error: '프로젝트 미선택' }; return; }
     try {
       const blob = await resizeToWebP(file);
       const form = new FormData();
       form.append('file', blob, file.name.replace(/\.[^.]+$/, '.webp'));
-      const r = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/slides`, {
+      const r = await fetch(`${API_BASE}/api/projects/${projectId}/slides`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: form,
@@ -434,7 +485,7 @@
   async function onDrop(e, targetId) {
     e.preventDefault();
     dragOverId = null;
-    if (!dragSrcId || dragSrcId === targetId) { dragSrcId = null; return; }
+    if (!dragSrcId || dragSrcId === targetId || !selectedProject) { dragSrcId = null; return; }
 
     const slides = sorted(selectedProject.slides);
     const srcIdx = slides.findIndex(s => s.id === dragSrcId);
@@ -455,23 +506,26 @@
   function onDragEnd() { dragSrcId = null; dragOverId = null; }
 
   async function deleteSlide(slideId) {
-    if (!confirm('이 슬라이드를 삭제하시겠습니까?')) return;
+    if (!selectedProject || !confirm('이 슬라이드를 삭제하시겠습니까?')) return;
     const r = await apiDelete(`/api/projects/${selectedProject.id}/slides/${slideId}`);
     if (r.ok) {
       selectedProject = { ...selectedProject, slides: selectedProject.slides.filter(s => s.id !== slideId) };
       flash('삭제되었습니다.');
-    }
+    } else flash('', '슬라이드 삭제 실패');
   }
 
   async function clearAllSlides() {
-    if (!confirm('모든 슬라이드를 삭제하시겠습니까?')) return;
+    if (!selectedProject || !confirm('모든 슬라이드를 삭제하시겠습니까?')) return;
     const r = await apiDelete(`/api/projects/${selectedProject.id}/slides`);
     if (r.ok) { selectedProject = { ...selectedProject, slides: [], summarySlideId: null }; flash('초기화되었습니다.'); }
+    else flash('', '초기화 실패');
   }
 
   async function setSummarySlide(slideId) {
+    if (!selectedProject) return;
     const r = await apiPut(`/api/projects/${selectedProject.id}`, { summarySlideId: slideId || null });
     if (r.ok) selectedProject = await r.json();
+    else flash('', '변경 실패');
   }
 
   // ── Signatory operations ───────────────────────────────────────────────────
@@ -488,6 +542,7 @@
   }
 
   async function saveSig() {
+    if (!selectedProject || !editSig) return;
     if (!editSig.title.trim() || !editSig.name.trim()) {
       editSigError = '직함과 이름을 입력해주세요.'; return;
     }
@@ -504,13 +559,15 @@
   }
 
   async function deleteSig(sigId) {
-    if (!confirm('서명자를 삭제하시겠습니까?')) return;
-    const sigs = selectedProject.signatories.filter(s => s.id !== sigId);
+    if (!selectedProject || !confirm('서명자를 삭제하시겠습니까?')) return;
+    const sigs = (selectedProject.signatories || []).filter(s => s.id !== sigId);
     const r = await apiPut(`/api/projects/${selectedProject.id}`, { signatories: sigs });
     if (r.ok) { selectedProject = await r.json(); flash('삭제되었습니다.'); }
+    else flash('', '삭제 실패');
   }
 
   async function moveSig(sigId, dir) {
+    if (!selectedProject?.signatories) return;
     const sigs = [...selectedProject.signatories];
     const idx = sigs.findIndex(s => s.id === sigId);
     const ni = idx + dir;
@@ -557,20 +614,23 @@
 
   // ── Signature operations ───────────────────────────────────────────────────
   async function clearOneSig(signId) {
-    if (!confirm('이 서명을 초기화하시겠습니까?')) return;
+    if (!selectedProject || !confirm('이 서명을 초기화하시겠습니까?')) return;
     const r = await apiDelete(`/api/projects/${selectedProject.id}/signatures/${signId}`);
     if (r.ok) { await loadSignatures(); flash('초기화되었습니다.'); }
+    else flash('', '초기화 실패');
   }
 
   async function clearAllSigs() {
-    if (!confirm('모든 서명을 초기화하시겠습니까?')) return;
+    if (!selectedProject || !confirm('모든 서명을 초기화하시겠습니까?')) return;
     const r = await apiDelete(`/api/projects/${selectedProject.id}/signatures`);
     if (r.ok) { await loadSignatures(); flash('전체 초기화되었습니다.'); }
+    else flash('', '초기화 실패');
   }
 
   // ── Connection operations ──────────────────────────────────────────────────
   async function disconnect(target) {
-    const r = await apiPost('/api/disconnect', { target });
+    if (!selectedProject) return;
+    const r = await apiPost(`/api/disconnect/${selectedProject.id}`, { target });
     if (r.ok) { await loadConnStatus(); flash('연결을 해제했습니다.'); }
   }
 
@@ -581,31 +641,71 @@
     if (tab === 'signatures') await loadSignatures();
     if (tab === 'connections') {
       await loadConnStatus();
-      if (!remoteQr) await loadRemoteQr();
+      remoteQr = '';  // 프로젝트 변경 시 QR 초기화
+      await loadRemoteQr();
     }
+    if (tab === 'settings') await loadProjectPin();
     saveNavState();
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   onDestroy(() => clearInterval(connInterval));
 
+  // ── Project PIN edit ───────────────────────────────────────────────────────
+  let editPin = $state('');
+  let editPinLoaded = $state(false);
+
+  async function loadProjectPin() {
+    if (!selectedProject) return;
+    // PIN은 publicProject에서 제거되므로 hasPin만 확인 가능
+    // 실제 PIN 값을 보여주지 않고 변경만 지원
+    editPin = '';
+    editPinLoaded = true;
+  }
+
+  async function saveProjectPin() {
+    if (!selectedProject) return;
+    const pid = selectedProject.id;
+    loading = true;
+    try {
+      const r = await apiPut(`/api/projects/${pid}/pin`, { pin: editPin.trim() || null });
+      if (r.ok) {
+        await loadAll();
+        if (selectedProject?.id === pid) await loadProject(pid);
+        flash(editPin.trim() ? 'PIN이 설정되었습니다.' : 'PIN이 해제되었습니다.');
+        editPin = '';
+      } else flash('', 'PIN 변경 실패');
+    } catch { flash('', 'PIN 변경 중 오류 발생'); }
+    loading = false;
+  }
+
   const NAV_ITEMS = [
     { id: 'slides',       label: '슬라이드' },
     { id: 'signatories',  label: '서명자' },
     { id: 'connections',  label: '연결현황' },
     { id: 'signatures',   label: '서명관리' },
+    { id: 'settings',     label: '설정' },
   ];
 </script>
 
 <svelte:head><title>관리자 — Presenta</title></svelte:head>
 
+<!-- ── Loading / Auth check ── -->
+{#if authChecking}
+  <div class="pin-screen">
+    <div class="pin-card">
+      <div class="logo-badge">Presenta</div>
+      <p class="auth-loading">인증 확인 중...</p>
+    </div>
+  </div>
+
 <!-- ── PIN Screen ── -->
-{#if pinView}
+{:else if pinView}
   <div class="pin-screen">
     <div class="pin-card">
       <div class="logo-badge">Presenta</div>
       <h1>관리자 인증</h1>
-      {#if pinError}<div class="alert-err">{pinError}</div>{/if}
+      {#if pinError}<div class="flash flash-err">{pinError}</div>{/if}
       <input class="pin-input" type="password" placeholder="PIN 입력" maxlength="10"
         bind:value={pinInput} onkeydown={e => e.key === 'Enter' && submitPin()} autofocus />
       <button class="btn-gold" onclick={submitPin}>확인</button>
@@ -632,16 +732,7 @@
             <button class="sidebar-add-btn" onclick={() => { showNewProject = !showNewProject; }} title="새 프로젝트">+</button>
           </div>
 
-          {#if showNewProject}
-            <div class="new-project-form">
-              <input class="text-input text-input-sm" placeholder="프로젝트 이름" bind:value={newProjectName}
-                onkeydown={e => e.key === 'Enter' && createProject()} autofocus />
-              <div class="new-project-form-btns">
-                <button class="btn-gold btn-sm" disabled={loading || !newProjectName.trim()} onclick={createProject}>생성</button>
-                <button class="btn-ghost btn-sm" onclick={() => { showNewProject = false; newProjectName = ''; }}>취소</button>
-              </div>
-            </div>
-          {/if}
+          <!-- 프로젝트 생성 모달은 하단에 위치 -->
 
           {#if projects.length === 0}
             <div class="sidebar-empty">프로젝트 없음</div>
@@ -650,7 +741,7 @@
               {#each projects as p (p.id)}
                 <button class="project-list-item" class:selected={selectedProject?.id === p.id}
                   onclick={() => openProject(p)}>
-                  <span class="project-active-dot" class:active={p.id === activeProjectId}></span>
+                  <span class="project-active-dot" class:active={isActive(p.id)}></span>
                   <span class="project-list-name">{p.name}</span>
                 </button>
               {/each}
@@ -714,7 +805,7 @@
               <span class="topbar-bc-current" onclick={() => { nameInput = selectedProject.name; editingName = true; }}
                 title="클릭하여 이름 변경">
                 {selectedProject.name}
-                {#if activeProjectId === selectedProject.id}
+                {#if isActive(selectedProject.id)}
                   <span class="active-badge">활성</span>
                 {/if}
               </span>
@@ -730,9 +821,13 @@
           {/if}
         </div>
 
-        {#if selectedProject && activeProjectId !== selectedProject.id}
-          <button class="btn-gold btn-sm topbar-activate-btn" disabled={loading}
-            onclick={() => activateProject(selectedProject.id)}>활성화</button>
+        {#if selectedProject}
+          <button class="btn-sm topbar-activate-btn" disabled={loading}
+            class:btn-gold={!isActive(selectedProject.id)}
+            class:btn-danger={isActive(selectedProject.id)}
+            onclick={() => toggleActive(selectedProject.id)}>
+            {isActive(selectedProject.id) ? '비활성화' : '활성화'}
+          </button>
         {/if}
       </div>
 
@@ -826,8 +921,8 @@
                 <div class="guide-step-body">
                   <div class="guide-step-title">프로젝트 활성화</div>
                   <div class="guide-step-desc">
-                    프로젝트 목록에서 <strong>활성화</strong> 버튼을 클릭합니다. 활성화된 프로젝트만 슬라이드쇼와 서명자 화면에 표시됩니다.<br>
-                    <span class="guide-tip">💡 동시에 하나의 프로젝트만 활성화 가능합니다.</span>
+                    프로젝트 목록에서 <strong>활성화</strong> 버튼을 클릭합니다. 활성화된 프로젝트만 메인 페이지에 표시됩니다.<br>
+                    <span class="guide-tip">💡 여러 프로젝트를 동시에 활성화할 수 있습니다.</span>
                   </div>
                 </div>
               </div>
@@ -840,10 +935,11 @@
                 <div class="guide-step-body">
                   <div class="guide-step-title">기기 연결</div>
                   <div class="guide-step-desc">
-                    루트 페이지(<code class="guide-code">/</code>)에서 QR 코드를 확인할 수 있습니다.<br>
+                    루트 페이지(<code class="guide-code">/</code>)에 접속하면 활성화된 프로젝트 목록이 표시됩니다.<br>
                     <ul class="guide-list">
-                      <li>슬라이드쇼 PC: <strong>슬라이드쇼 표출</strong> QR 스캔 또는 <code class="guide-code">/display</code> 접속</li>
-                      <li>각 서명자 태블릿: <strong>서명자 화면</strong> QR 스캔 또는 <code class="guide-code">/sign</code> 접속 → 본인 이름 선택</li>
+                      <li>행사(프로젝트) 선택 → PIN 입력(설정된 경우) → 역할 선택</li>
+                      <li>슬라이드쇼 PC: <strong>슬라이드쇼</strong> 버튼 클릭</li>
+                      <li>각 서명자 태블릿: <strong>서명</strong> 버튼 클릭 → 본인 이름 선택</li>
                     </ul>
                     <strong>연결현황 탭</strong>에서 각 기기의 연결 상태를 실시간으로 확인할 수 있습니다.
                   </div>
@@ -896,11 +992,11 @@
             {:else}
               <div class="project-cards">
                 {#each projects as p (p.id)}
-                  <div class="project-card" class:active={p.id === activeProjectId}>
+                  <div class="project-card" class:active={isActive(p.id)}>
                     <div class="project-card-body" onclick={() => openProject(p)} role="button" tabindex="0">
                       <div class="project-card-name">
                         {p.name}
-                        {#if p.id === activeProjectId}<span class="active-badge">활성</span>{/if}
+                        {#if isActive(p.id)}<span class="active-badge">활성</span>{/if}
                       </div>
                       <div class="project-card-meta">
                         슬라이드 {p.slides?.length ?? 0}개 · 서명자 {p.signatories?.length ?? 0}명
@@ -908,9 +1004,11 @@
                       <div class="project-card-date">{new Date(p.createdAt).toLocaleDateString('ko-KR')}</div>
                     </div>
                     <div class="project-card-actions">
-                      {#if p.id !== activeProjectId}
-                        <button class="btn-sm btn-gold" disabled={loading} onclick={() => activateProject(p.id)}>활성화</button>
-                      {/if}
+                      <button class="btn-sm" disabled={loading}
+                        class:btn-gold={!isActive(p.id)} class:btn-outline={isActive(p.id)}
+                        onclick={() => toggleActive(p.id)}>
+                        {isActive(p.id) ? '비활성화' : '활성화'}
+                      </button>
                       <button class="btn-sm btn-outline" disabled={loading} onclick={() => duplicateProject(p.id)}>복제</button>
                       <button class="btn-sm btn-danger" disabled={loading} onclick={() => deleteProject(p.id)}>삭제</button>
                     </div>
@@ -1278,15 +1376,78 @@
               {/each}
             </div>
           </div>
+
+        <!-- ── Project: Settings ── -->
+        {:else if activeTab === 'settings'}
+          <div class="content-section">
+            <div class="section-header">
+              <h2 class="section-title">프로젝트 설정</h2>
+            </div>
+
+            <div class="form-card">
+              <div class="form-section-label">참여 PIN</div>
+              <p class="helper-text" style="margin-top:-8px">
+                메인 페이지에서 이 프로젝트에 접근할 때 필요한 비밀번호입니다.
+                {#if selectedProject?.hasPin}
+                  <span class="active-badge" style="margin-left:8px">PIN 설정됨</span>
+                {:else}
+                  <span style="color:rgba(232,224,208,.55);margin-left:8px">PIN 미설정 (자유 접근)</span>
+                {/if}
+              </p>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <input class="text-input" type="text" placeholder={selectedProject?.hasPin ? '새 PIN 입력 (변경)' : 'PIN 입력'}
+                    maxlength="10" bind:value={editPin} />
+                </div>
+              </div>
+              <div class="form-footer">
+                <button class="btn-gold btn-sm" disabled={loading} onclick={saveProjectPin}>
+                  {editPin.trim() ? 'PIN 변경' : 'PIN 해제'}
+                </button>
+              </div>
+            </div>
+
+            <div class="form-card">
+              <div class="form-section-label">프로젝트 관리</div>
+              <div class="form-footer">
+                <button class="btn-outline btn-sm" disabled={loading} onclick={() => duplicateProject(selectedProject.id)}>프로젝트 복제</button>
+                <button class="btn-danger btn-sm" disabled={loading} onclick={() => deleteProject(selectedProject.id)}>프로젝트 삭제</button>
+              </div>
+            </div>
+          </div>
         {/if}
 
       </div>
     </div>
   </div>
+
+  <!-- ── 프로젝트 생성 모달 ── -->
+  {#if showNewProject}
+    <div class="modal-overlay" onclick={() => { showNewProject = false; newProjectName = ''; newProjectPin = ''; }}>
+      <div class="modal-card" onclick={e => e.stopPropagation()}>
+        <h2 class="modal-title">새 프로젝트 만들기</h2>
+        <div class="form-group">
+          <label class="field-label">행사 이름</label>
+          <input class="text-input modal-input" placeholder="예: 2025년 정기총회" bind:value={newProjectName}
+            onkeydown={e => e.key === 'Enter' && createProject()} autofocus />
+        </div>
+        <div class="form-group">
+          <label class="field-label">참여 PIN (선택)</label>
+          <input class="text-input" type="text" placeholder="미입력 시 PIN 없이 접근 가능" maxlength="10"
+            bind:value={newProjectPin} />
+          <p class="helper-text">메인 페이지에서 프로젝트 접근 시 필요한 비밀번호입니다.</p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-ghost" onclick={() => { showNewProject = false; newProjectName = ''; newProjectPin = ''; }}>취소</button>
+          <button class="btn-gold" disabled={loading || !newProjectName.trim()} onclick={createProject}>생성</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 {/if}
 
 <style>
-  :global(body) { margin: 0; font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; background: #0a0a0f; }
+  :global(body) { margin: 0; font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; background: #0e0e16; color: #e8e0d0; }
 
   /* ── PIN ── */
   .pin-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh;
@@ -1298,24 +1459,25 @@
     border-radius: 10px; color: #f0e8d8; font-size: 20px; text-align: center; letter-spacing: .2em;
     font-family: inherit; outline: none; box-sizing: border-box; }
   .pin-input:focus { border-color: rgba(201,168,76,.5); }
+  .auth-loading { color: rgba(232,224,208,.6); font-size: 14px; margin: 0; }
 
   /* ── App layout ── */
   .app-layout { display: flex; min-height: 100vh; }
 
   /* ── Sidebar ── */
-  .sidebar { width: 240px; flex-shrink: 0; background: #0d0d14; border-right: 1px solid rgba(255,255,255,.07);
+  .sidebar { width: 240px; flex-shrink: 0; background: #111119; border-right: 1px solid rgba(255,255,255,.1);
     display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
   .sidebar-inner { display: flex; flex-direction: column; padding: 20px 0 40px; min-height: 100%; }
 
   .sidebar-brand { padding: 0 18px 20px; border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 8px; }
   .brand-logo { display: inline-block; padding: 4px 12px; border: 1px solid rgba(201,168,76,.4); border-radius: 20px;
     color: #c9a84c; font-size: 11px; font-weight: 700; letter-spacing: .12em; background: rgba(201,168,76,.07); }
-  .brand-sub { font-size: 11px; color: rgba(232,224,208,.3); margin-top: 6px; padding-left: 2px; letter-spacing: .04em; }
+  .brand-sub { font-size: 11px; color: rgba(232,224,208,.5); margin-top: 6px; padding-left: 2px; letter-spacing: .04em; }
 
   .sidebar-group { padding: 8px 0; }
   .sidebar-group-header { display: flex; align-items: center; justify-content: space-between;
     padding: 4px 18px 6px; }
-  .sidebar-group-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.3); letter-spacing: .1em; text-transform: uppercase; }
+  .sidebar-group-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.5); letter-spacing: .1em; text-transform: uppercase; }
   .sidebar-group-label--project { display: block; padding: 4px 18px 8px; font-size: 11px; color: rgba(232,224,208,.5);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sidebar-add-btn { width: 20px; height: 20px; background: rgba(201,168,76,.1); border: 1px solid rgba(201,168,76,.2);
@@ -1331,7 +1493,7 @@
 
   .project-list { display: flex; flex-direction: column; }
   .project-list-item { display: flex; align-items: center; gap: 8px; padding: 8px 18px;
-    background: none; border: none; color: rgba(232,224,208,.6); font-size: 13px; font-family: inherit;
+    background: none; border: none; color: rgba(232,224,208,.75); font-size: 13px; font-family: inherit;
     text-align: left; cursor: pointer; transition: all .15s; width: 100%; }
   .project-list-item:hover { background: rgba(255,255,255,.04); color: #f0e8d8; }
   .project-list-item.selected { background: rgba(201,168,76,.08); color: #f0e8d8; }
@@ -1343,9 +1505,9 @@
 
   .sidebar-nav { display: flex; flex-direction: column; }
   .sidebar-nav-item { padding: 9px 18px 9px 28px; background: none; border: none; border-left: 2px solid transparent;
-    color: rgba(232,224,208,.45); font-size: 13px; font-family: inherit; text-align: left; cursor: pointer;
+    color: rgba(232,224,208,.7); font-size: 13px; font-family: inherit; text-align: left; cursor: pointer;
     transition: all .15s; }
-  .sidebar-nav-item:hover { color: rgba(232,224,208,.8); background: rgba(255,255,255,.03); }
+  .sidebar-nav-item:hover { color: #f0e8d8; background: rgba(255,255,255,.05); }
   .sidebar-nav-item.active { color: #c9a84c; border-left-color: #c9a84c; background: rgba(201,168,76,.06); }
 
   /* Mobile sidebar */
@@ -1365,10 +1527,10 @@
   .main-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
   .topbar { display: flex; align-items: center; gap: 12px; padding: 14px 28px;
-    border-bottom: 1px solid rgba(255,255,255,.07); background: rgba(10,10,15,.8);
+    border-bottom: 1px solid rgba(255,255,255,.1); background: rgba(10,10,15,.8);
     backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 10; }
   .topbar-breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 14px; flex: 1; overflow: hidden; }
-  .topbar-bc-link { color: rgba(232,224,208,.4); cursor: pointer; white-space: nowrap; }
+  .topbar-bc-link { color: rgba(232,224,208,.6); cursor: pointer; white-space: nowrap; }
   .topbar-bc-link:hover { color: rgba(232,224,208,.7); }
   .topbar-bc-sep { color: rgba(255,255,255,.15); }
   .topbar-bc-current { font-weight: 600; color: #f0e8d8; cursor: pointer; display: flex; align-items: center; gap: 8px;
@@ -1391,9 +1553,9 @@
   .section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .section-header-actions { display: flex; gap: 8px; }
   .section-title { font-size: 18px; font-weight: 700; color: #f0e8d8; margin: 0; }
-  .helper-text { font-size: 12px; color: rgba(232,224,208,.3); margin: 0; }
+  .helper-text { font-size: 12px; color: rgba(232,224,208,.6); margin: 0; }
   .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px;
-    padding: 40px 20px; text-align: center; color: rgba(232,224,208,.3); font-size: 14px;
+    padding: 40px 20px; text-align: center; color: rgba(232,224,208,.5); font-size: 14px;
     border: 1px dashed rgba(255,255,255,.08); border-radius: 12px; }
 
   /* Badges */
@@ -1405,14 +1567,14 @@
 
   /* ── Project cards ── */
   .project-cards { display: flex; flex-direction: column; gap: 10px; }
-  .project-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+  .project-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1);
     border-radius: 12px; overflow: hidden; transition: border-color .2s; }
   .project-card.active { border-color: rgba(201,168,76,.25); background: rgba(201,168,76,.04); }
   .project-card-body { padding: 16px 20px; cursor: pointer; }
   .project-card-body:hover { background: rgba(255,255,255,.02); }
   .project-card-name { font-size: 15px; font-weight: 600; color: #f0e8d8; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-  .project-card-meta { font-size: 13px; color: rgba(232,224,208,.4); }
-  .project-card-date { font-size: 12px; color: rgba(232,224,208,.25); margin-top: 4px; }
+  .project-card-meta { font-size: 13px; color: rgba(232,224,208,.7); }
+  .project-card-date { font-size: 12px; color: rgba(232,224,208,.45); margin-top: 4px; }
   .project-card-actions { display: flex; gap: 8px; padding: 10px 16px;
     border-top: 1px solid rgba(255,255,255,.05); background: rgba(0,0,0,.1); }
 
@@ -1422,13 +1584,13 @@
     cursor: pointer; transition: all .2s; }
   .btn-gold:hover:not(:disabled) { background: rgba(201,168,76,.25); border-color: #c9a84c; }
   .btn-gold:disabled { opacity: .4; cursor: not-allowed; }
-  .btn-outline { padding: 8px 16px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 8px; color: rgba(232,224,208,.7); font-size: 13px; font-family: inherit; cursor: pointer; transition: all .2s; }
+  .btn-outline { padding: 8px 16px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px; color: rgba(232,224,208,.8); font-size: 13px; font-family: inherit; cursor: pointer; transition: all .2s; }
   .btn-outline:hover { background: rgba(255,255,255,.09); color: #f0e8d8; }
   .btn-danger { padding: 8px 16px; background: rgba(200,60,60,.12); border: 1px solid rgba(200,60,60,.3);
     border-radius: 8px; color: #e07070; font-size: 13px; font-family: inherit; cursor: pointer; transition: all .2s; }
   .btn-danger:hover:not(:disabled) { background: rgba(200,60,60,.22); }
-  .btn-ghost { padding: 7px 14px; background: none; border: none; color: rgba(232,224,208,.5); font-size: 13px; font-family: inherit; cursor: pointer; }
+  .btn-ghost { padding: 7px 14px; background: none; border: none; color: rgba(232,224,208,.65); font-size: 13px; font-family: inherit; cursor: pointer; }
   .btn-ghost:hover { color: #f0e8d8; }
   .btn-sm { padding: 5px 12px; font-size: 12px; }
   .btn-icon { width: 28px; height: 28px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
@@ -1449,12 +1611,12 @@
   .select-input:focus { border-color: rgba(201,168,76,.4); }
   .select-input-inline { max-width: 240px; }
   .field-row { display: flex; align-items: center; gap: 12px; }
-  .field-label { font-size: 12px; font-weight: 600; color: rgba(232,224,208,.5); letter-spacing: .05em; white-space: nowrap; }
+  .field-label { font-size: 12px; font-weight: 600; color: rgba(232,224,208,.7); letter-spacing: .05em; white-space: nowrap; }
 
   /* ── Slides ── */
   .upload-btn { cursor: pointer; }
   .drop-zone { border: 2px dashed rgba(255,255,255,.1); border-radius: 10px; padding: 20px;
-    text-align: center; color: rgba(232,224,208,.3); font-size: 13px; transition: all .2s; }
+    text-align: center; color: rgba(232,224,208,.5); font-size: 13px; transition: all .2s; }
   .drop-zone.dragover { border-color: rgba(201,168,76,.5); background: rgba(201,168,76,.05); color: #c9a84c; }
   .upload-queue { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .upload-item { font-size: 12px; padding: 3px 8px; border-radius: 4px;
@@ -1465,11 +1627,11 @@
   .slide-row { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,.04);
     border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 14px;
     transition: background .15s, border-color .15s, opacity .15s; cursor: grab; }
-  .slide-row:hover { background: rgba(255,255,255,.07); }
+  .slide-row:hover { background: rgba(255,255,255,.1); }
   .slide-row.summary { border-color: rgba(201,168,76,.4); background: rgba(201,168,76,.04); }
   .slide-row.dragging { opacity: .4; cursor: grabbing; }
   .slide-row.drag-over { border-color: #c9a84c; background: rgba(201,168,76,.08); }
-  .drag-handle { font-size: 16px; color: rgba(232,224,208,.3); cursor: grab; user-select: none;
+  .drag-handle { font-size: 16px; color: rgba(232,224,208,.5); cursor: grab; user-select: none;
     padding: 0 2px; flex-shrink: 0; }
   .slide-row:hover .drag-handle { color: rgba(232,224,208,.6); }
   .slide-num { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.7); min-width: 24px; text-align: center; }
@@ -1484,9 +1646,9 @@
   .row-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
   /* ── Signatory form ── */
-  .form-card { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+  .form-card { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.1);
     border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-  .form-section-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.35);
+  .form-section-label { font-size: 10px; font-weight: 700; color: rgba(232,224,208,.65);
     letter-spacing: .12em; text-transform: uppercase; padding-bottom: 8px;
     border-bottom: 1px solid rgba(255,255,255,.05); }
   .form-row-2 { display: flex; gap: 12px; }
@@ -1518,21 +1680,21 @@
   .btn-analyze:disabled { opacity: .5; cursor: not-allowed; }
   .analyze-error { font-size: 12px; color: #e07070; }
   .analyzed-colors { display: flex; flex-direction: column; gap: 8px; }
-  .analyzed-label { font-size: 11px; color: rgba(232,224,208,.35); letter-spacing: .04em; }
+  .analyzed-label { font-size: 11px; color: rgba(232,224,208,.55); letter-spacing: .04em; }
   .analyzed-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
   .color-swatch.analyzed { width: 32px; height: 32px; border-radius: 8px; }
 
   /* ── Signatory list ── */
   .sig-list { display: flex; flex-direction: column; gap: 8px; }
   .sig-row { display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.03);
-    border: 1px solid rgba(255,255,255,.07); border-radius: 10px; padding: 12px 14px; overflow: hidden; position: relative; }
+    border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 12px 14px; overflow: hidden; position: relative; }
   .sig-color-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 10px 0 0 10px; }
   .sig-order-badge { width: 24px; height: 24px; border-radius: 50%; background: rgba(201,168,76,.1);
     border: 1px solid rgba(201,168,76,.25); color: #c9a84c; font-size: 12px; font-weight: 700;
     display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 6px; }
   .sig-info { flex: 1; min-width: 0; }
   .sig-name { font-size: 14px; font-weight: 600; color: #f0e8d8; }
-  .sig-meta { font-size: 12px; color: rgba(232,224,208,.35); margin-top: 2px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .sig-meta { font-size: 12px; color: rgba(232,224,208,.55); margin-top: 2px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   .sig-color-chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
     border: 1px solid rgba(255,255,255,.2); vertical-align: middle; }
 
@@ -1548,7 +1710,7 @@
     border: 1px solid rgba(220,80,60,.2); color: rgba(232,224,208,.6); font-size: 13px;
     line-height: 1.7; }
   .empty-state-warn strong { color: #c9a84c; }
-  .picker-hint { font-size: 12px; color: rgba(232,224,208,.4); margin: 0 0 8px; }
+  .picker-hint { font-size: 12px; color: rgba(232,224,208,.6); margin: 0 0 8px; }
   .picker-wrap { position: relative; border-radius: 8px; overflow: hidden; cursor: crosshair;
     user-select: none; border: 1px solid rgba(255,255,255,.1); }
   .picker-wrap img { display: block; width: 100%; pointer-events: none; }
@@ -1560,14 +1722,14 @@
   /* ── Connections ── */
   .conn-list { display: flex; flex-direction: column; gap: 8px; }
   .conn-row { display: flex; align-items: center; gap: 12px; padding: 14px 18px;
-    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1);
     border-radius: 12px; transition: border-color .3s; }
   .conn-row.connected { background: rgba(201,168,76,.05); border-color: rgba(201,168,76,.15); }
   .conn-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.1); flex-shrink: 0; }
   .conn-dot.on { background: #c9a84c; box-shadow: 0 0 6px rgba(201,168,76,.4); }
   .conn-info { flex: 1; }
   .conn-label { font-size: 14px; font-weight: 600; color: #f0e8d8; }
-  .conn-sub { font-size: 12px; color: rgba(232,224,208,.35); }
+  .conn-sub { font-size: 12px; color: rgba(232,224,208,.65); }
 
   /* ── Remote QR section ── */
   .section-sub-title { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.7); margin-bottom: 4px; }
@@ -1576,10 +1738,10 @@
   /* ── QR ── */
   .qr-grid { display: flex; gap: 20px; flex-wrap: wrap; }
   .qr-card { display: flex; flex-direction: column; align-items: center; gap: 8px;
-    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 16px; }
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 16px; }
   .qr-card-label { font-size: 13px; font-weight: 600; color: rgba(232,224,208,.5); }
   .qr-img { border-radius: 8px; }
-  .qr-url { font-size: 11px; color: rgba(232,224,208,.4); font-family: monospace; }
+  .qr-url { font-size: 11px; color: rgba(232,224,208,.6); font-family: monospace; }
 
   /* ── Sig preview ── */
   .sig-preview { width: 80px; height: 32px; object-fit: contain; border: 1px solid rgba(255,255,255,.1);
@@ -1589,14 +1751,14 @@
   .sidebar-spacer { flex: 1; }
   .sidebar-bottom { padding: 12px 10px; border-top: 1px solid rgba(255,255,255,.06); }
   .sidebar-guide-btn { width: 100%; padding: 9px 14px; background: none; border: 1px solid rgba(255,255,255,.08);
-    border-radius: 8px; color: rgba(232,224,208,.4); font-size: 13px; font-family: inherit;
+    border-radius: 8px; color: rgba(232,224,208,.6); font-size: 13px; font-family: inherit;
     text-align: left; cursor: pointer; transition: all .15s; }
   .sidebar-guide-btn:hover { background: rgba(255,255,255,.05); color: rgba(232,224,208,.8); }
   .sidebar-guide-btn.active { background: rgba(201,168,76,.08); border-color: rgba(201,168,76,.25); color: #c9a84c; }
 
   /* ── Guide content ── */
   .guide-section { max-width: 760px; }
-  .guide-block { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+  .guide-block { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.1);
     border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
   .guide-block-title { font-size: 15px; font-weight: 700; color: #f0e8d8; }
   .guide-text { margin: 0; font-size: 13px; color: rgba(232,224,208,.65); line-height: 1.7; }
@@ -1620,4 +1782,14 @@
   .guide-warn-list li { color: rgba(232,100,100,.75); }
   .guide-code { font-family: monospace; font-size: 12px; padding: 1px 6px;
     background: rgba(255,255,255,.08); border-radius: 4px; color: rgba(232,224,208,.8); }
+
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center; z-index: 300; padding: 20px; }
+  .modal-card { background: #14141e; border: 1px solid rgba(201,168,76,.25); border-radius: 16px;
+    padding: 32px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 16px; }
+  .modal-title { font-size: 18px; font-weight: 700; color: #f0e8d8; margin: 0; }
+  .modal-desc { font-size: 14px; color: rgba(232,224,208,.6); margin: 0; }
+  .modal-input { font-size: 16px; padding: 14px 16px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 </style>
