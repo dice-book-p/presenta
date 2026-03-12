@@ -25,10 +25,10 @@
   let lastX = 0;
   let lastY = 0;
 
-  // 드로잉 배치 전송 (50ms 간격으로 포인트 묶어서 전송)
+  // 드로잉 배치 전송 (30ms 간격으로 포인트 묶어서 전송 ≈ 33fps)
   let drawBatch = [];
   let batchTimer = null;
-  const BATCH_INTERVAL = 50;
+  const BATCH_INTERVAL = 30;
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const signatories = $derived(activeProject?.signatories ?? []);
@@ -117,11 +117,9 @@
     lastX = e.offsetX * (canvasEl.width  / canvasEl.clientWidth);
     lastY = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
     const ctx = getCtx();
-    ctx?.beginPath();
-    ctx?.moveTo(lastX, lastY);
+    if (ctx) { ctx.beginPath(); ctx.moveTo(lastX, lastY); }
     const x = e.offsetX / canvasEl.clientWidth;
     const y = e.offsetY / canvasEl.clientHeight;
-    // start는 즉시 전송 (배치에 넣지 않음)
     flushDrawBatch();
     wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'start' });
   }
@@ -133,15 +131,17 @@
     const py = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
     const ctx = getCtx();
     if (ctx) {
-      ctx.beginPath();
-      ctx.moveTo(lastX, lastY);
-      ctx.lineTo(px, py);
+      // 베지어 곡선 스무딩: 이전 점과 현재 점의 중간을 끝점으로, 이전 점을 제어점으로
+      const midX = (lastX + px) / 2;
+      const midY = (lastY + py) / 2;
+      ctx.quadraticCurveTo(lastX, lastY, midX, midY);
       ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(midX, midY);
     }
     lastX = px;
     lastY = py;
 
-    // 포인트를 배치에 누적, 50ms마다 묶어서 전송
     const x = e.offsetX / canvasEl.clientWidth;
     const y = e.offsetY / canvasEl.clientHeight;
     drawBatch.push({ x, y });
@@ -151,7 +151,14 @@
   function onPointerUp(e) {
     if (!isDrawing) return;
     isDrawing = false;
-    // 남은 배치 즉시 전송 후 end
+    // 마지막 점까지 선 마무리
+    const ctx = getCtx();
+    if (ctx && canvasEl) {
+      const px = e.offsetX * (canvasEl.width / canvasEl.clientWidth);
+      const py = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+    }
     flushDrawBatch();
     clearTimeout(batchTimer);
     batchTimer = null;

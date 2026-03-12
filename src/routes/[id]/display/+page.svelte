@@ -82,6 +82,26 @@
     return `top:${area.top};left:${left};width:${area.width};height:${area.height}`;
   }
 
+  /** 베지어 곡선으로 부드럽게 한 점 그리기 */
+  function drawSmoothPoint(ctx, state, px, py) {
+    if (!state.lastX && state.lastX !== 0) {
+      // 첫 점
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      state.lastX = px;
+      state.lastY = py;
+      return;
+    }
+    const midX = (state.lastX + px) / 2;
+    const midY = (state.lastY + py) / 2;
+    ctx.quadraticCurveTo(state.lastX, state.lastY, midX, midY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(midX, midY);
+    state.lastX = px;
+    state.lastY = py;
+  }
+
   function handleDraw(msg) {
     const sig = project?.signatories?.find(s => s.id === msg.signId);
     if (!sig) return;
@@ -98,20 +118,21 @@
       ctx.moveTo(px, py);
       drawingState[msg.signId] = { lastX: px, lastY: py };
     } else if (msg.action === 'move') {
-      const prev = drawingState[msg.signId];
-      if (prev) {
-        ctx.beginPath();
-        ctx.moveTo(prev.lastX, prev.lastY);
-        ctx.lineTo(px, py);
-        ctx.stroke();
-        drawingState[msg.signId] = { lastX: px, lastY: py };
-      } else {
-        // start 메시지 유실된 경우 — 첫 move를 start로 처리
+      if (!drawingState[msg.signId]) {
+        // start 유실 → 첫 move를 start로 처리
         ctx.beginPath();
         ctx.moveTo(px, py);
         drawingState[msg.signId] = { lastX: px, lastY: py };
+      } else {
+        drawSmoothPoint(ctx, drawingState[msg.signId], px, py);
       }
     } else if (msg.action === 'end') {
+      // 마지막 점까지 직선 마무리
+      const prev = drawingState[msg.signId];
+      if (prev) {
+        ctx.lineTo(px, py);
+        ctx.stroke();
+      }
       drawingState[msg.signId] = null;
     }
   }
@@ -126,17 +147,20 @@
     const points = msg.points;
     if (!points?.length) return;
 
+    if (!drawingState[msg.signId]) {
+      // start 유실 → 첫 배치 점을 start로
+      const first = points[0];
+      const fx = first.x * canvas.width;
+      const fy = first.y * canvas.height;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      drawingState[msg.signId] = { lastX: fx, lastY: fy };
+    }
+
     for (const pt of points) {
       const px = pt.x * canvas.width;
       const py = pt.y * canvas.height;
-      const prev = drawingState[msg.signId];
-      if (prev) {
-        ctx.beginPath();
-        ctx.moveTo(prev.lastX, prev.lastY);
-        ctx.lineTo(px, py);
-        ctx.stroke();
-      }
-      drawingState[msg.signId] = { lastX: px, lastY: py };
+      drawSmoothPoint(ctx, drawingState[msg.signId], px, py);
     }
   }
 
