@@ -4,6 +4,11 @@
   import { session } from '$lib/stores/session.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
+  // URL에서 프로젝트 ID 추출
+  const projectId = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('p') ?? ''
+    : '';
+
   // ── State ─────────────────────────────────────────────────────────────────────
   let activeProject  = $state(null);   // loaded from /api/active
   let loadError      = $state('');
@@ -195,7 +200,7 @@
 
   $effect(() => {
     if (wsStore.status === 'connected' && view === 'signing' && session.data) {
-      wsStore.send({ type: 'identify_tablet', signId: session.data.signId });
+      wsStore.send({ type: 'identify_tablet', signId: session.data.signId, projectId });
     }
   });
 

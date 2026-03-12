@@ -4,6 +4,11 @@
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
+  // URL에서 프로젝트 ID 추출
+  const projectId = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('p') ?? ''
+    : '';
+
   // ── State ─────────────────────────────────────────────────────────────────────
   let project      = $state(null);
   let currentSlide = $state(0);
@@ -314,7 +319,7 @@
     // identify 전송 (연결 직후 & 재연결 시)
     let identifyInterval = setInterval(() => {
       if (wsStore.status === 'connected' && !identified && !rejected) {
-        wsStore.send({ type: 'identify_display' });
+        wsStore.send({ type: 'identify_display', projectId });
       }
     }, 500);
 
@@ -331,7 +336,7 @@
 
   $effect(() => {
     if (wsStore.status === 'connected' && !identified && !rejected) {
-      wsStore.send({ type: 'identify_display' });
+      wsStore.send({ type: 'identify_display', projectId });
     }
   });
 </script>

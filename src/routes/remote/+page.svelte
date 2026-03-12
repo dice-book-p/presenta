@@ -3,10 +3,10 @@
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
-  // URL에서 토큰 추출
-  const token = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('t') ?? ''
-    : '';
+  // URL에서 토큰 + 프로젝트 ID 추출
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const token = params.get('t') ?? '';
+  const projectId = params.get('p') ?? '';
 
   let project      = $state(null);
   let slideOrder   = $state(0);
@@ -68,7 +68,7 @@
     // Identify
     let identifyInterval = setInterval(() => {
       if (wsStore.status === 'connected' && !identified && !rejected) {
-        wsStore.send({ type: 'identify_remote', token });
+        wsStore.send({ type: 'identify_remote', token, projectId });
       }
     }, 500);
 
