@@ -12,7 +12,7 @@ const {
   getProjects, getProject, createProject, updateProject, deleteProject, duplicateProject,
   getActiveProjects, activateProject, deactivateProject, isProjectActive, isReady,
   addSlide, reorderSlides, removeSlide,
-  updateSignatories,
+  updateSignatories, updateProjectPin,
 } = await import('../server/store/projects.js');
 
 beforeEach(() => _resetForTest());
@@ -233,6 +233,35 @@ describe('updateSignatories()', () => {
 
   it('없는 프로젝트 ID → null 반환', () => {
     assert.equal(updateSignatories('bad', []), null);
+  });
+});
+
+// ── PIN ──────────────────────────────────────────────────────────────────────
+
+describe('updateProjectPin()', () => {
+  it('PIN 설정', () => {
+    const p = createProject('Test');
+    const updated = updateProjectPin(p.id, '1234');
+    assert.equal(updated.pin, '1234');
+    assert.equal(getProject(p.id).pin, '1234');
+  });
+
+  it('PIN 해제 (null)', () => {
+    const p = createProject('Test');
+    updateProjectPin(p.id, '1234');
+    updateProjectPin(p.id, null);
+    assert.equal(getProject(p.id).pin, '');
+  });
+
+  it('PIN 해제 (빈 문자열)', () => {
+    const p = createProject('Test');
+    updateProjectPin(p.id, '1234');
+    updateProjectPin(p.id, '');
+    assert.equal(getProject(p.id).pin, '');
+  });
+
+  it('없는 프로젝트 → null 반환', () => {
+    assert.equal(updateProjectPin('bad-id', '1234'), null);
   });
 });
 
