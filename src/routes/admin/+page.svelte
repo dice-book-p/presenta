@@ -534,10 +534,22 @@
 
   async function ensurePdfWorker() {
     if (pdfWorkerReady) return;
-    const pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url
-    ).href;
+    if (!window.pdfjsLib) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+        s.type = 'module';
+        // module script로는 글로벌 노출이 안 되므로 classic 방식 사용
+        s.remove();
+        const sc = document.createElement('script');
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
+        sc.onload = resolve;
+        sc.onerror = reject;
+        document.head.appendChild(sc);
+      });
+    }
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js';
     pdfWorkerReady = true;
   }
 
@@ -550,9 +562,8 @@
 
     try {
       await ensurePdfWorker();
-      const pdfjsLib = await import('pdfjs-dist');
       const arrayBuf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuf }).promise;
       const pageCount = pdf.numPages;
 
       // PDF 진행 상태 업데이트
