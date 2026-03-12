@@ -33,9 +33,6 @@
   }
 
   onMount(async () => {
-    // 슬라이드쇼에서 나온 경우 플래그 초기화
-    sessionStorage.removeItem('display_active');
-
     try {
       const res = await fetch(`${API_BASE}/api/active`);
       if (res.ok) {
