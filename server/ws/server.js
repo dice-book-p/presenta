@@ -235,8 +235,13 @@ export function createWebSocketServer(server) {
         // ── 리모컨 슬라이드 제어 ─────────────────────────────────────────────
         case 'remote_slide': {
           if (ws.role !== 'remote') return;
-          // Forward to main display
           sendToMain(ws.projectId, { type: 'remote_slide', direction: msg.direction });
+          break;
+        }
+
+        // ── 클라이언트 ping → pong 응답 ─────────────────────────────────────
+        case 'ping': {
+          if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'pong' }));
           break;
         }
       }

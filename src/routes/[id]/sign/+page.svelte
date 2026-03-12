@@ -17,6 +17,7 @@
   let connectedTablets = $state({});
   let activeSignId   = $state(null);
   let signDone       = $state(false);
+  let savedSignatures = $state({});  // signId → true (서명 완료 여부)
 
   // Canvas
   let canvasEl = $state(null);
@@ -199,6 +200,13 @@
     wsCleanups.push(wsStore.on('active_changed', () => {
       window.location.reload();
     }));
+
+    // 재연결 시 자동 re-identify
+    wsCleanups.push(wsStore.on('_reconnected', () => {
+      if (view === 'signing' && session.data) {
+        wsStore.send({ type: 'identify_tablet', signId: session.data.signId, projectId });
+      }
+    }));
   }
 
   function teardownHandlers() {
@@ -212,20 +220,34 @@
     }
   });
 
+  async function loadSavedSignatures() {
+    if (!activeProject) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${activeProject.id}/signatures`);
+      if (res.ok) {
+        const data = await res.json();
+        savedSignatures = Object.fromEntries(
+          Object.entries(data).map(([k, v]) => [k, !!v])
+        );
+      }
+    } catch {}
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   onMount(async () => {
     setupHandlers();
     await loadActiveProject();
 
-    // 초기 연결 상태 조회
+    // 초기 연결 상태 + 서명 상태 조회
     try {
-      const res = await fetch(`${API_BASE}/api/status`);
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/status`);
       if (res.ok) {
         const data = await res.json();
         connectedTablets = data.tablets ?? {};
         if (data.currentActiveSignId !== undefined) activeSignId = data.currentActiveSignId;
       }
     } catch {}
+    await loadSavedSignatures();
 
     // 세션 복원: signId가 현재 프로젝트에 존재하는지 확인
     if (session.hasSession) {
@@ -279,10 +301,12 @@
       {:else}
         <div class="sign-list">
           {#each signatories as sig (sig.id)}
-            {@const isConnected = connectedTablets[sig.id] === true}
+            {@const isConnected = connectedTablets[sig.id]?.connected === true}
+            {@const isSigned = savedSignatures[sig.id] === true}
             <button
               class="sign-item"
               class:occupied={isConnected}
+              class:signed={isSigned && !isConnected}
               disabled={isConnected}
               onclick={() => selectSignatory(sig)}
             >
@@ -293,11 +317,16 @@
                   <span class="sign-name">{sig.name}</span>
                 </div>
               </div>
-              {#if isConnected}
-                <span class="badge-connected">연결됨</span>
-              {:else}
-                <span class="badge-select">선택 →</span>
-              {/if}
+              <div class="sign-item-badges">
+                {#if isSigned}
+                  <span class="badge-signed">서명완료</span>
+                {/if}
+                {#if isConnected}
+                  <span class="badge-connected">연결됨</span>
+                {:else}
+                  <span class="badge-select">선택 →</span>
+                {/if}
+              </div>
             </button>
           {/each}
         </div>
@@ -529,6 +558,20 @@
     border: 1px solid rgba(76, 175, 80, 0.3);
     padding: 4px 10px;
     border-radius: 12px;
+  }
+
+  .sign-item.signed { border-color: rgba(76, 175, 80, 0.2); }
+
+  .sign-item-badges { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+  .badge-signed {
+    font-size: 11px;
+    font-weight: 600;
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+    padding: 3px 8px;
+    border-radius: 10px;
   }
 
   .badge-select { font-size: 13px; color: rgba(201, 168, 76, 0.7); }

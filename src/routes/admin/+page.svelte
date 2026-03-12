@@ -868,7 +868,7 @@
     editSig = null;
     if (tab === 'signatures') await loadSignatures();
     if (tab === 'connections') {
-      await loadConnStatus();
+      await Promise.all([loadConnStatus(), loadSignatures()]);
       remoteQr = '';  // 프로젝트 변경 시 QR 초기화
       signQr = '';
       await Promise.all([loadRemoteQr(), loadSignQr()]);
@@ -1608,10 +1608,14 @@
                 </div>
                 {#each (selectedProject.signatories || []) as sig (sig.id)}
                   {@const connected = connStatus.tablets?.[sig.id]?.connected === true}
+                  {@const hasSig = !!signatures[sig.id]}
                   <div class="conn-row" class:connected>
                     <span class="conn-dot" class:on={connected}></span>
                     <div class="conn-info">
-                      <div class="conn-label">{sig.order}. {sig.title} — {sig.name}</div>
+                      <div class="conn-label">
+                        {sig.order}. {sig.title} — {sig.name}
+                        {#if hasSig}<span class="conn-sig-badge">서명완료</span>{/if}
+                      </div>
                       <div class="conn-sub">{connected ? '연결됨' : '미연결'}</div>
                     </div>
                     {#if connected}
@@ -2136,6 +2140,17 @@
   .conn-info { flex: 1; }
   .conn-label { font-size: 14px; font-weight: 600; color: #f0e8d8; }
   .conn-sub { font-size: 12px; color: rgba(232,224,208,.7); }
+  .conn-sig-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: #4caf50;
+    background: rgba(76,175,80,.1);
+    border: 1px solid rgba(76,175,80,.25);
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
 
   /* ── Remote QR section ── */
   .section-sub-title { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.85); margin-bottom: 4px; }

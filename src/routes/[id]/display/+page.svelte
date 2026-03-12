@@ -118,18 +118,36 @@
     if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
+  let signSaveToast = $state('');
+  let signSaveTimer = null;
+
+  function showSignSaveToast(msg, isError = false) {
+    signSaveToast = (isError ? '⚠ ' : '✓ ') + msg;
+    clearTimeout(signSaveTimer);
+    signSaveTimer = setTimeout(() => { signSaveToast = ''; }, 3000);
+  }
+
   async function saveSignatureToServer(signId) {
     if (!project) return;
     const canvas = canvasRefs[signId];
     if (!canvas) return;
+    const sig = project.signatories?.find(s => s.id === signId);
+    const sigLabel = sig ? `${sig.title} ${sig.name}` : signId;
     const dataUrl = canvas.toDataURL('image/png');
     try {
-      await fetch(`${API_BASE}/api/projects/${project.id}/signatures`, {
+      const res = await fetch(`${API_BASE}/api/projects/${project.id}/signatures`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signId, dataUrl }),
       });
-    } catch {}
+      if (res.ok) {
+        showSignSaveToast(`${sigLabel} 서명 저장 완료`);
+      } else {
+        showSignSaveToast(`${sigLabel} 서명 저장 실패`, true);
+      }
+    } catch {
+      showSignSaveToast(`${sigLabel} 서명 저장 실패 (네트워크)`, true);
+    }
   }
 
   async function restoreSignatures() {
@@ -354,7 +372,14 @@
       else if (msg.direction === 'prev') goToSlide(currentSlide - 1);
     }));
 
-    // identify 전송 (연결 직후 & 재연결 시)
+    // 재연결 시 자동 re-identify
+    unsubs.push(wsStore.on('_reconnected', () => {
+      identified = false;
+      rejected = false;
+      wsStore.send({ type: 'identify_display', projectId });
+    }));
+
+    // identify 전송 (초기 연결)
     let identifyInterval = setInterval(() => {
       if (wsStore.status === 'connected' && !identified && !rejected) {
         wsStore.send({ type: 'identify_display', projectId });
@@ -368,6 +393,7 @@
       clearTimeout(boundaryToastTimer);
       clearTimeout(controlsTimer);
       clearTimeout(slideNumTimer);
+      clearTimeout(signSaveTimer);
       unsubs.forEach(fn => fn());
       wsStore.disconnect();
     };
@@ -471,6 +497,11 @@
         <span class="num-value">{slideNumBuffer}</span>
         <span class="num-hint">Enter</span>
       </div>
+    {/if}
+
+    <!-- 서명 저장 토스트 -->
+    {#if signSaveToast}
+      <div class="sign-save-toast">{signSaveToast}</div>
     {/if}
 
     <!-- 경계 안내 토스트 -->
@@ -943,6 +974,24 @@
   .ctrl-hint {
     font-size: 11px;
     color: rgba(232, 224, 208, 0.3);
+  }
+
+  /* ── Sign save toast ── */
+  .sign-save-toast {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(10, 10, 15, 0.9);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(76, 175, 80, 0.4);
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(232, 224, 208, 0.85);
+    z-index: 20;
+    pointer-events: none;
+    animation: toast-fade 3s ease-in-out;
   }
 
   /* ── Slide number input indicator ── */

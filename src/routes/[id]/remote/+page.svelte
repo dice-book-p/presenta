@@ -71,7 +71,14 @@
       window.location.reload();
     }));
 
-    // Identify
+    // 재연결 시 자동 re-identify
+    unsubs.push(wsStore.on('_reconnected', () => {
+      identified = false;
+      rejected = false;
+      wsStore.send({ type: 'identify_remote', token, projectId });
+    }));
+
+    // Identify (초기 연결)
     let identifyInterval = setInterval(() => {
       if (wsStore.status === 'connected' && !identified && !rejected) {
         wsStore.send({ type: 'identify_remote', token, projectId });
