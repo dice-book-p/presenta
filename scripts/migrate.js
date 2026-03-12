@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -87,14 +88,18 @@ const SIGNATORIES_CONFIG = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+async function toWebP(buffer) {
+  return sharp(buffer).webp({ quality: 90 }).toBuffer();
+}
+
 async function uploadImage(projectId, filename, buffer) {
-  const ext = filename.split('.').pop().toLowerCase();
-  const storedFilename = `${randomUUID()}.${ext}`;
+  const webpBuffer = await toWebP(buffer);
+  const storedFilename = `${randomUUID()}.webp`;
   const path = `${projectId}/${storedFilename}`;
 
   const { error } = await supabase.storage
     .from(SLIDES_BUCKET)
-    .upload(path, buffer, { contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`, upsert: false });
+    .upload(path, webpBuffer, { contentType: 'image/webp', upsert: false });
 
   if (error) throw new Error(`Upload failed for ${filename}: ${error.message}`);
 

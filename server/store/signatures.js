@@ -22,6 +22,12 @@ export async function initSignaturesStore() {
 
 export const isSignaturesReady = () => ready;
 
+/** 테스트 전용: 스토어 상태 초기화 */
+export function _resetForTest(initial = {}) {
+  store = { ...initial };
+  ready = true;
+}
+
 function persist() {
   saveData('signatures.json', store).catch(e =>
     console.error('[signatures] persist error:', e.message)

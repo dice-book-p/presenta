@@ -29,6 +29,12 @@ export async function initProjectsStore() {
 
 export const isReady = () => ready;
 
+/** 테스트 전용: 스토어 상태 초기화 */
+export function _resetForTest(initial = { activeProjectId: null, projects: [] }) {
+  store = { ...initial };
+  ready = true;
+}
+
 function persist() {
   saveData('projects.json', store).catch(e =>
     console.error('[projects] persist error:', e.message)
