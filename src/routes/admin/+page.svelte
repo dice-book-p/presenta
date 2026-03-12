@@ -1262,43 +1262,91 @@
 
         <!-- ── Projects home (no project selected) ── -->
         {:else if !selectedProject}
-          <div class="content-section">
-            <div class="section-header">
-              <h2 class="section-title">프로젝트 목록</h2>
+
+          <!-- 대시보드 요약 -->
+          {@const activeProjects = projects.filter(p => isActive(p.id))}
+          {@const totalSlides = projects.reduce((s, p) => s + (p.slides?.length ?? 0), 0)}
+          {@const totalSignatories = projects.reduce((s, p) => s + (p.signatories?.length ?? 0), 0)}
+
+          <div class="dashboard">
+            <div class="dash-stats">
+              <div class="dash-stat">
+                <span class="dash-stat-num">{projects.length}</span>
+                <span class="dash-stat-label">프로젝트</span>
+              </div>
+              <div class="dash-stat">
+                <span class="dash-stat-num dash-active">{activeProjects.length}</span>
+                <span class="dash-stat-label">활성</span>
+              </div>
+              <div class="dash-stat">
+                <span class="dash-stat-num">{totalSlides}</span>
+                <span class="dash-stat-label">슬라이드</span>
+              </div>
+              <div class="dash-stat">
+                <span class="dash-stat-num">{totalSignatories}</span>
+                <span class="dash-stat-label">서명자</span>
+              </div>
             </div>
 
-            {#if projects.length === 0}
-              <div class="empty-state">
-                <div>프로젝트가 없습니다.</div>
-                <button class="btn-gold" onclick={() => showNewProject = true}>첫 프로젝트 만들기</button>
-              </div>
-            {:else}
-              <div class="project-cards">
-                {#each projects as p (p.id)}
-                  <div class="project-card" class:active={isActive(p.id)}>
-                    <div class="project-card-body" onclick={() => openProject(p)} role="button" tabindex="0">
-                      <div class="project-card-name">
-                        {p.name}
-                        {#if isActive(p.id)}<span class="active-badge">활성</span>{/if}
-                      </div>
-                      <div class="project-card-meta">
-                        슬라이드 {p.slides?.length ?? 0}개 · 서명자 {p.signatories?.length ?? 0}명
-                      </div>
-                      <div class="project-card-date">{new Date(p.createdAt).toLocaleDateString('ko-KR')}</div>
+            <!-- 활성 프로젝트 바로가기 -->
+            {#if activeProjects.length > 0}
+              <div class="dash-active-section">
+                <h3 class="dash-section-title">활성 프로젝트</h3>
+                {#each activeProjects as p (p.id)}
+                  <div class="dash-active-card" onclick={() => openProject(p)} role="button" tabindex="0">
+                    <div class="dash-active-info">
+                      <span class="dash-active-name">{p.name}</span>
+                      <span class="dash-active-meta">슬라이드 {p.slides?.length ?? 0}개 · 서명자 {p.signatories?.length ?? 0}명</span>
                     </div>
-                    <div class="project-card-actions">
-                      <button class="btn-sm" disabled={loading}
-                        class:btn-gold={!isActive(p.id)} class:btn-outline={isActive(p.id)}
-                        onclick={() => toggleActive(p.id)}>
-                        {isActive(p.id) ? '비활성화' : '활성화'}
-                      </button>
-                      <button class="btn-sm btn-outline" disabled={loading} onclick={() => duplicateProject(p.id)}>복제</button>
-                      <button class="btn-sm btn-danger" disabled={loading} onclick={() => deleteProject(p.id)}>삭제</button>
+                    <div class="dash-active-links">
+                      <a href="/{p.id}/display" target="_blank" class="dash-link" onclick={e => e.stopPropagation()}>슬라이드쇼</a>
+                      <a href="/{p.id}/sign" target="_blank" class="dash-link" onclick={e => e.stopPropagation()}>서명</a>
                     </div>
                   </div>
                 {/each}
               </div>
             {/if}
+
+            <!-- 프로젝트 목록 -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2 class="section-title">전체 프로젝트</h2>
+                <button class="btn-gold btn-sm" onclick={() => showNewProject = true}>+ 새 프로젝트</button>
+              </div>
+
+              {#if projects.length === 0}
+                <div class="empty-state">
+                  <div>프로젝트가 없습니다.</div>
+                  <button class="btn-gold" onclick={() => showNewProject = true}>첫 프로젝트 만들기</button>
+                </div>
+              {:else}
+                <div class="project-cards">
+                  {#each projects as p (p.id)}
+                    <div class="project-card" class:active={isActive(p.id)}>
+                      <div class="project-card-body" onclick={() => openProject(p)} role="button" tabindex="0">
+                        <div class="project-card-name">
+                          {p.name}
+                          {#if isActive(p.id)}<span class="active-badge">활성</span>{/if}
+                        </div>
+                        <div class="project-card-meta">
+                          슬라이드 {p.slides?.length ?? 0}개 · 서명자 {p.signatories?.length ?? 0}명
+                        </div>
+                        <div class="project-card-date">{new Date(p.createdAt).toLocaleDateString('ko-KR')}</div>
+                      </div>
+                      <div class="project-card-actions">
+                        <button class="btn-sm" disabled={loading}
+                          class:btn-gold={!isActive(p.id)} class:btn-outline={isActive(p.id)}
+                          onclick={() => toggleActive(p.id)}>
+                          {isActive(p.id) ? '비활성화' : '활성화'}
+                        </button>
+                        <button class="btn-sm btn-outline" disabled={loading} onclick={() => duplicateProject(p.id)}>복제</button>
+                        <button class="btn-sm btn-danger" disabled={loading} onclick={() => deleteProject(p.id)}>삭제</button>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
 
         <!-- ── Project: Slides ── -->
@@ -1989,6 +2037,47 @@
   .logo-badge { display: inline-block; padding: 4px 14px; border: 1px solid rgba(201,168,76,.5);
     border-radius: 20px; color: #c9a84c; font-size: 11px; font-weight: 600; letter-spacing: .1em;
     background: rgba(201,168,76,.06); }
+
+  /* ── Dashboard ── */
+  .dashboard { display: flex; flex-direction: column; gap: 24px; max-width: 820px; }
+
+  .dash-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  }
+  .dash-stat {
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px; padding: 18px 16px; text-align: center;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .dash-stat-num { font-size: 28px; font-weight: 700; color: #f0e8d8; }
+  .dash-stat-num.dash-active { color: #c9a84c; }
+  .dash-stat-label { font-size: 12px; color: rgba(232,224,208,.5); font-weight: 500; }
+
+  .dash-active-section { display: flex; flex-direction: column; gap: 10px; }
+  .dash-section-title { font-size: 14px; font-weight: 600; color: rgba(232,224,208,.6); margin: 0; }
+
+  .dash-active-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: rgba(201,168,76,.04); border: 1px solid rgba(201,168,76,.2);
+    border-radius: 12px; padding: 14px 20px; cursor: pointer; transition: background .15s;
+  }
+  .dash-active-card:hover { background: rgba(201,168,76,.08); }
+  .dash-active-info { display: flex; flex-direction: column; gap: 2px; }
+  .dash-active-name { font-size: 15px; font-weight: 600; color: #f0e8d8; }
+  .dash-active-meta { font-size: 12px; color: rgba(232,224,208,.5); }
+  .dash-active-links { display: flex; gap: 8px; flex-shrink: 0; }
+  .dash-link {
+    font-size: 12px; color: #c9a84c; text-decoration: none;
+    padding: 4px 10px; border: 1px solid rgba(201,168,76,.3); border-radius: 6px;
+    transition: background .15s;
+  }
+  .dash-link:hover { background: rgba(201,168,76,.12); }
+
+  @media (max-width: 600px) {
+    .dash-stats { grid-template-columns: repeat(2, 1fr); }
+    .dash-active-card { flex-direction: column; align-items: flex-start; }
+    .dash-active-links { align-self: flex-end; }
+  }
 
   /* ── Project cards ── */
   .project-cards { display: flex; flex-direction: column; gap: 10px; }
