@@ -165,6 +165,8 @@
   let showControls = $state(false);     // 컨트롤 바 표시
   let controlsTimer = null;
   let showExitConfirm = $state(false); // 나가기 확인 다이얼로그
+  let slideNumBuffer = $state('');     // 숫자 입력 버퍼 (숫자+Enter 이동)
+  let slideNumTimer = null;
 
   const SS_SLIDE = 'display_slide';
 
@@ -235,6 +237,27 @@
   }
 
   function handleKeyDown(e) {
+    // 숫자 키 (0-9): 버퍼에 누적, 3초 후 자동 초기화
+    if (e.key >= '0' && e.key <= '9') {
+      slideNumBuffer += e.key;
+      clearTimeout(slideNumTimer);
+      slideNumTimer = setTimeout(() => { slideNumBuffer = ''; }, 3000);
+      return;
+    }
+
+    // Enter: 버퍼에 숫자가 있으면 해당 슬라이드로 이동
+    if (e.key === 'Enter' && slideNumBuffer) {
+      const num = parseInt(slideNumBuffer, 10);
+      slideNumBuffer = '';
+      clearTimeout(slideNumTimer);
+      if (num >= 1 && num <= sortedSlides.length) {
+        goToSlide(num - 1); // 1-based → 0-based
+      } else {
+        showBoundaryToast(`슬라이드 ${num}번이 없습니다 (1~${sortedSlides.length})`);
+      }
+      return;
+    }
+
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
       e.preventDefault(); goToSlide(currentSlide + 1);
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
@@ -344,6 +367,7 @@
       stopAutoPlay();
       clearTimeout(boundaryToastTimer);
       clearTimeout(controlsTimer);
+      clearTimeout(slideNumTimer);
       unsubs.forEach(fn => fn());
       wsStore.disconnect();
     };
@@ -440,6 +464,15 @@
       </div>
     {/if}
 
+    <!-- 숫자 입력 표시 -->
+    {#if slideNumBuffer}
+      <div class="slide-num-indicator">
+        <span class="num-label">이동:</span>
+        <span class="num-value">{slideNumBuffer}</span>
+        <span class="num-hint">Enter</span>
+      </div>
+    {/if}
+
     <!-- 경계 안내 토스트 -->
     {#if boundaryToast}
       <div class="boundary-toast">{boundaryToast}</div>
@@ -515,7 +548,7 @@
 
       <!-- 단축키 안내 -->
       <div class="ctrl-hint">
-        Space/Arrow: 넘김 | F: 전체화면 | L: 반복 | A: 자동 | Esc: 나가기
+        Space/Arrow: 넘김 | 숫자+Enter: 이동 | F: 전체화면 | L: 반복 | A: 자동 | Esc: 나가기
       </div>
     </div>
   </div>
@@ -910,5 +943,52 @@
   .ctrl-hint {
     font-size: 11px;
     color: rgba(232, 224, 208, 0.3);
+  }
+
+  /* ── Slide number input indicator ── */
+  .slide-num-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 10, 15, 0.9);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(201, 168, 76, 0.4);
+    border-radius: 14px;
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 25;
+    pointer-events: none;
+    animation: num-pop 0.15s ease-out;
+  }
+
+  @keyframes num-pop {
+    from { transform: translate(-50%, -50%) scale(0.9); opacity: 0; }
+    to   { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  }
+
+  .num-label {
+    font-size: 14px;
+    color: rgba(232, 224, 208, 0.5);
+  }
+
+  .num-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #c9a84c;
+    letter-spacing: 0.05em;
+    min-width: 40px;
+    text-align: center;
+  }
+
+  .num-hint {
+    font-size: 11px;
+    color: rgba(232, 224, 208, 0.35);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 2px 6px;
   }
 </style>

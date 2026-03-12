@@ -337,7 +337,13 @@
 
   async function loadConnStatus() {
     if (!selectedProject) { connStatus = null; return; }
-    connStatus = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/status`).then(r => r.json()).catch(() => null);
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/status`);
+      if (r.ok) {
+        connStatus = await r.json();
+      }
+      // 실패 시 기존 connStatus 유지 (깜빡임 방지)
+    } catch {}
   }
 
   function startConnPoll() {
