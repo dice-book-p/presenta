@@ -33,8 +33,8 @@
 <main>
   <div class="hero">
     <div class="logo-area">
-      <div class="logo-badge">한전KDN</div>
-      <h1 class="title">단체협약 체결식</h1>
+      <div class="logo-badge">Presenta</div>
+      <h1 class="title">프레젠타</h1>
       <p class="subtitle">시스템 역할을 선택해주세요</p>
     </div>
 

@@ -1,4 +1,4 @@
-app = "kdn-offline-show"
+app = "presenta"
 primary_region = "nrt"  # Tokyo — 한국에서 가장 가까운 리전
 
 [build]
@@ -28,6 +28,6 @@ primary_region = "nrt"  # Tokyo — 한국에서 가장 가까운 리전
   # SvelteKit adapter-node는 서버에서 직접 static 서빙하므로 별도 설정 불필요
 
 [mounts]
-  source = "kdn_data"
+  source = "presenta_data"
   destination = "/data"
-  # fly volumes create kdn_data --region nrt  ← 최초 1회 실행 필요
+  # fly volumes create presenta_data --region nrt  ← 최초 1회 실행 필요

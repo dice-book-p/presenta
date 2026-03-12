@@ -5,7 +5,7 @@
 <svelte:head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>한전KDN 단체협약 체결식</title>
+  <title>Presenta — 프레젠타</title>
 </svelte:head>
 
 {@render children()}

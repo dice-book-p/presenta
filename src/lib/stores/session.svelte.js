@@ -1,4 +1,4 @@
-const SESSION_KEY = 'kdn_sign_session';
+const SESSION_KEY = 'presenta_sign_session';
 
 class SessionStore {
   data = $state(null); // { signId, title, name, order }

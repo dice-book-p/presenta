@@ -597,13 +597,13 @@
   ];
 </script>
 
-<svelte:head><title>관리자 — 한전KDN</title></svelte:head>
+<svelte:head><title>관리자 — Presenta</title></svelte:head>
 
 <!-- ── PIN Screen ── -->
 {#if pinView}
   <div class="pin-screen">
     <div class="pin-card">
-      <div class="logo-badge">한전KDN</div>
+      <div class="logo-badge">Presenta</div>
       <h1>관리자 인증</h1>
       {#if pinError}<div class="alert-err">{pinError}</div>{/if}
       <input class="pin-input" type="password" placeholder="PIN 입력" maxlength="10"
@@ -621,7 +621,7 @@
       <div class="sidebar-inner">
         <!-- Brand -->
         <div class="sidebar-brand">
-          <div class="brand-logo">한전KDN</div>
+          <div class="brand-logo">Presenta</div>
           <div class="brand-sub">관리자</div>
         </div>
 
@@ -776,7 +776,7 @@
                 <div class="guide-step-num">1</div>
                 <div class="guide-step-body">
                   <div class="guide-step-title">프로젝트 생성</div>
-                  <div class="guide-step-desc">왼쪽 사이드바 <strong>프로젝트 +</strong> 버튼을 눌러 새 프로젝트를 만드세요. 행사명을 입력합니다. (예: 2025년 단체협약)</div>
+                  <div class="guide-step-desc">왼쪽 사이드바 <strong>프로젝트 +</strong> 버튼을 눌러 새 프로젝트를 만드세요. 행사명을 입력합니다. (예: 2025년 정기총회)</div>
                 </div>
               </div>
 

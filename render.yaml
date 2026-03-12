@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: kdn-offline-show
+    name: presenta
     runtime: node
     plan: free
     buildCommand: npm ci && npm run build

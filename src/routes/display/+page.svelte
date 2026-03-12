@@ -254,7 +254,7 @@
 </script>
 
 <svelte:head>
-  <title>슬라이드쇼 — 한전KDN</title>
+  <title>슬라이드쇼 — Presenta</title>
 </svelte:head>
 
 <!-- 활성 프로젝트 없음 -->

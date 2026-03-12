@@ -231,7 +231,7 @@
 </script>
 
 <svelte:head>
-  <title>서명자 화면 — 한전KDN</title>
+  <title>서명 — Presenta</title>
 </svelte:head>
 
 {#if view === 'login'}
@@ -239,7 +239,7 @@
   <div class="page login-page">
     <div class="login-container">
       <div class="login-header">
-        <div class="logo-badge">한전KDN</div>
+        <div class="logo-badge">Presenta</div>
         <h1>서명자 선택</h1>
         <p class="login-sub">서명하실 역할을 선택해주세요</p>
       </div>

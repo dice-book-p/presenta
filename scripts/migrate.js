@@ -126,7 +126,7 @@ async function saveSignaturesData() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('=== KDN Offline 마이그레이션 시작 ===\n');
+  console.log('=== Presenta 마이그레이션 시작 ===\n');
 
   // 환경변수 체크
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

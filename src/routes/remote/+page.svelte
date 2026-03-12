@@ -86,7 +86,7 @@
   });
 </script>
 
-<svelte:head><title>리모컨 — 한전KDN</title></svelte:head>
+<svelte:head><title>리모컨 — Presenta</title></svelte:head>
 
 {#if !token || (rejected && !noProject)}
   <div class="screen center">

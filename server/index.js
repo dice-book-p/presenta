@@ -26,9 +26,9 @@ createWebSocketServer(server);
 
 Promise.all([initProjectsStore(), initSignaturesStore()]).then(() => {
   server.listen(PORT, () => {
-    console.log(`[KDN Show] Server running on port ${PORT}`);
+    console.log(`[Presenta] Server running on port ${PORT}`);
   });
 }).catch(e => {
-  console.error('[KDN Show] Init failed:', e.message);
+  console.error('[Presenta] Init failed:', e.message);
   process.exit(1);
 });
