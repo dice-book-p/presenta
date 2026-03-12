@@ -536,20 +536,15 @@
     if (pdfWorkerReady) return;
     if (!window.pdfjsLib) {
       await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
-        s.type = 'module';
-        // module script로는 글로벌 노출이 안 되므로 classic 방식 사용
-        s.remove();
         const sc = document.createElement('script');
-        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js';
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
         sc.onload = resolve;
         sc.onerror = reject;
         document.head.appendChild(sc);
       });
     }
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js';
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     pdfWorkerReady = true;
   }
 
