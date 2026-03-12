@@ -233,16 +233,45 @@
     imageFiles.forEach(processAndUpload);
   }
 
-  async function moveSlide(slideId, dir) {
+  // ── Drag & Drop 슬라이드 순서 변경 ──────────────────────────────────────────
+  let dragSrcId  = $state(null);
+  let dragOverId = $state(null);
+
+  function onDragStart(e, slideId) {
+    dragSrcId = slideId;
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onDragOver(e, slideId) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (slideId !== dragSrcId) dragOverId = slideId;
+  }
+
+  function onDragLeave() { dragOverId = null; }
+
+  async function onDrop(e, targetId) {
+    e.preventDefault();
+    dragOverId = null;
+    if (!dragSrcId || dragSrcId === targetId) { dragSrcId = null; return; }
+
     const slides = sorted(selectedProject.slides);
-    const idx = slides.findIndex(s => s.id === slideId);
-    const swapIdx = idx + dir;
-    if (swapIdx < 0 || swapIdx >= slides.length) return;
-    [slides[idx].order, slides[swapIdx].order] = [slides[swapIdx].order, slides[idx].order];
-    const orderedIds = [...slides].sort((a, b) => a.order - b.order).map(s => s.id);
+    const srcIdx = slides.findIndex(s => s.id === dragSrcId);
+    const tgtIdx = slides.findIndex(s => s.id === targetId);
+    const reordered = [...slides];
+    const [moved] = reordered.splice(srcIdx, 1);
+    reordered.splice(tgtIdx, 0, moved);
+    const orderedIds = reordered.map(s => s.id);
+    dragSrcId = null;
+
+    // 낙관적 업데이트
+    selectedProject = { ...selectedProject, slides: reordered.map((s, i) => ({ ...s, order: i })) };
+
     const r = await apiPut(`/api/projects/${selectedProject.id}/slides/reorder`, { orderedIds });
     if (r.ok) selectedProject = { ...selectedProject, slides: await r.json() };
   }
+
+  function onDragEnd() { dragSrcId = null; dragOverId = null; }
 
   async function deleteSlide(slideId) {
     if (!confirm('이 슬라이드를 삭제하시겠습니까?')) return;
@@ -604,19 +633,27 @@
             {:else}
               <div class="slide-list">
                 {#each sorted(selectedProject.slides) as slide, i (slide.id)}
-                  <div class="slide-row" class:summary={slide.id === selectedProject.summarySlideId}>
+                  <div class="slide-row"
+                    class:summary={slide.id === selectedProject.summarySlideId}
+                    class:dragging={dragSrcId === slide.id}
+                    class:drag-over={dragOverId === slide.id}
+                    draggable="true"
+                    ondragstart={e => onDragStart(e, slide.id)}
+                    ondragover={e => onDragOver(e, slide.id)}
+                    ondragleave={onDragLeave}
+                    ondrop={e => onDrop(e, slide.id)}
+                    ondragend={onDragEnd}
+                  >
+                    <span class="drag-handle">⠿</span>
                     <span class="slide-num">{slide.order + 1}</span>
                     <img class="slide-thumb" src={slide.url} alt="슬라이드 {slide.order + 1}" loading="lazy" />
                     <div class="slide-info">
-                      <span class="slide-filename">{slide.filename}</span>
+                      <span class="slide-filename">{slide.originalFilename || slide.filename}</span>
                       {#if slide.id === selectedProject.summarySlideId}
                         <span class="tag-summary">종합 서약서</span>
                       {/if}
                     </div>
                     <div class="row-actions">
-                      <button class="btn-icon" onclick={() => moveSlide(slide.id, -1)} disabled={i === 0}>↑</button>
-                      <button class="btn-icon" onclick={() => moveSlide(slide.id, 1)}
-                        disabled={i === sorted(selectedProject.slides).length - 1}>↓</button>
                       <button class="btn-icon danger" onclick={() => deleteSlide(slide.id)}>✕</button>
                     </div>
                   </div>
@@ -1053,9 +1090,14 @@
   .slide-list { display: flex; flex-direction: column; gap: 8px; }
   .slide-row { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,.04);
     border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 14px;
-    transition: background .15s; }
+    transition: background .15s, border-color .15s, opacity .15s; cursor: grab; }
   .slide-row:hover { background: rgba(255,255,255,.07); }
   .slide-row.summary { border-color: rgba(201,168,76,.4); background: rgba(201,168,76,.04); }
+  .slide-row.dragging { opacity: .4; cursor: grabbing; }
+  .slide-row.drag-over { border-color: #c9a84c; background: rgba(201,168,76,.08); }
+  .drag-handle { font-size: 16px; color: rgba(232,224,208,.3); cursor: grab; user-select: none;
+    padding: 0 2px; flex-shrink: 0; }
+  .slide-row:hover .drag-handle { color: rgba(232,224,208,.6); }
   .slide-num { font-size: 14px; font-weight: 700; color: rgba(232,224,208,.7); min-width: 24px; text-align: center; }
   .slide-thumb { width: 96px; height: 54px; object-fit: cover; border-radius: 6px;
     border: 1px solid rgba(255,255,255,.12); flex-shrink: 0; }

@@ -114,7 +114,7 @@ async function uploadSlideHandler({ req, res, params }) {
     const { filename, url } = await uploadSlideImage(
       params.id, uploaded.filename, uploaded.buffer, uploaded.contentType
     );
-    json(res, 201, addSlide(params.id, { filename, url }));
+    json(res, 201, addSlide(params.id, { filename, url, originalFilename: uploaded.filename }));
   } catch (e) {
     json(res, 500, { error: e.message });
   }

@@ -111,10 +111,10 @@ export function duplicateProject(id) {
 
 // ── Slides ────────────────────────────────────────────────────────────────────
 
-export function addSlide(projectId, { filename, url }) {
+export function addSlide(projectId, { filename, url, originalFilename }) {
   const project = getProject(projectId);
   if (!project) return null;
-  const slide = { id: randomUUID(), order: project.slides.length, filename, url };
+  const slide = { id: randomUUID(), order: project.slides.length, filename, originalFilename: originalFilename || filename, url };
   project.slides.push(slide);
   persist();
   return slide;
