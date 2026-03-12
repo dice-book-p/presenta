@@ -242,6 +242,7 @@
   let slideNumTimer = null;
 
   const SS_SLIDE = 'display_slide';
+  const SS_IN_SLIDESHOW = 'display_active'; // 슬라이드쇼 진입 중 플래그
 
   function showBoundaryToast(msg) {
     boundaryToast = msg;
@@ -373,17 +374,23 @@
         noProject = false;
         ctxMap = {};  // reset ctx cache on project load
         applySlideshowSettings(msg.project);
-        // 저장된 슬라이드 인덱스 확인 → 1페이지가 아니면 물어보기
         const saved = sessionStorage.getItem(SS_SLIDE);
+        const isRefresh = sessionStorage.getItem(SS_IN_SLIDESHOW) === 'true';
+
         if (saved !== null) {
           const idx = parseInt(saved, 10);
           if (!isNaN(idx) && idx > 0 && idx < msg.project.slides.length) {
-            savedSlideIdx = idx;
-            showResumePrompt = true;
-            // 일단 1페이지로 시작, 사용자가 선택하면 이동
+            if (isRefresh) {
+              // 새로고침 → 조용히 복원
+              currentSlide = idx;
+            } else {
+              // 새로 진입 → 물어보기
+              savedSlideIdx = idx;
+              showResumePrompt = true;
+            }
           }
         }
-        sessionStorage.removeItem(SS_SLIDE);
+        sessionStorage.setItem(SS_IN_SLIDESHOW, 'true');
         await tick();
         restoreSignatures();
         if (autoPlay && !showResumePrompt) startAutoPlay();
@@ -559,7 +566,7 @@
           <p>현재 진행 중인 슬라이드쇼 연결이 해제됩니다.</p>
           <div class="exit-actions">
             <button class="exit-btn cancel" onclick={() => { showExitConfirm = false; }}>취소</button>
-            <button class="exit-btn confirm" onclick={() => goto(`/${projectId}`)}>종료</button>
+            <button class="exit-btn confirm" onclick={() => { sessionStorage.removeItem(SS_IN_SLIDESHOW); goto(`/${projectId}`); }}>종료</button>
           </div>
         </div>
       </div>
