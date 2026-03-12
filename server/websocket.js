@@ -1,11 +1,10 @@
 import { WebSocketServer } from 'ws';
-import { signatories } from './signatories.js';
+import { getActiveProject } from './projects-store.js';
 import {
   registerDisplay, registerTablet,
   unregisterDisplay, unregisterTablet,
-  findTabletSignId, handleSlideChange,
-  sendToDisplay, broadcastConnectionStatus,
-  getConnectionStatus, getConnections
+  handleSlideChange, sendToDisplay,
+  broadcastConnectionStatus, getConnectionStatus, getConnections,
 } from './connections.js';
 
 export function createWebSocketServer(server) {
@@ -13,35 +12,34 @@ export function createWebSocketServer(server) {
 
   wss.on('connection', (ws) => {
     ws.isAlive = true;
-    ws.role = null;
-    ws.signId = null;
+    ws.role    = null;
+    ws.signId  = null;
 
     ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (raw) => {
       let msg;
-      try {
-        msg = JSON.parse(raw.toString());
-      } catch {
-        return;
-      }
-
-      console.log(`[WS] msg: ${msg.type}${msg.signId ? ` signId=${msg.signId}` : ''} role=${ws.role}`);
+      try { msg = JSON.parse(raw.toString()); } catch { return; }
 
       switch (msg.type) {
 
         case 'identify_display': {
+          const project = getActiveProject();
+          if (!project) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'no_active_project' }));
+            return;
+          }
           const result = registerDisplay(ws);
           if (!result.success) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'display_occupied' }));
+            ws.send(JSON.stringify({ type: 'rejected', reason: result.reason }));
             return;
           }
           ws.role = 'display';
           ws.send(JSON.stringify({
             type: 'identified',
             role: 'display',
-            signatories,
-            connectionStatus: getConnectionStatus()
+            project,
+            connectionStatus: getConnectionStatus(),
           }));
           break;
         }
@@ -49,39 +47,49 @@ export function createWebSocketServer(server) {
         case 'identify_tablet': {
           const { signId } = msg;
           if (!signId) return;
-          const result = registerTablet(ws, signId);
-          if (!result.success) {
-            ws.send(JSON.stringify({ type: 'rejected', reason: 'tablet_occupied', signId }));
+          const project = getActiveProject();
+          if (!project) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'no_active_project' }));
             return;
           }
-          ws.role = 'tablet';
+          const signatory = project.signatories.find(s => s.id === signId);
+          if (!signatory) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: 'invalid_signatory' }));
+            return;
+          }
+          const result = registerTablet(ws, signId);
+          if (!result.success) {
+            ws.send(JSON.stringify({ type: 'rejected', reason: result.reason }));
+            return;
+          }
+          ws.role   = 'tablet';
           ws.signId = signId;
           ws.send(JSON.stringify({
             type: 'identified',
             role: 'tablet',
             signId,
-            signatories,
-            activeSignId: getConnectionStatus().currentActiveSignId ?? null
+            project,
+            activeSignId: getConnectionStatus().currentActiveSignId,
           }));
-          broadcastConnectionStatus();
           break;
         }
 
         case 'slide_change': {
           if (ws.role !== 'display') return;
-          handleSlideChange(msg.slideIndex, signatories);
+          const project = getActiveProject();
+          if (!project) return;
+          // attach _slideOrder to each signatory for handleSlideChange lookup
+          const sigsWithOrder = project.signatories.map(s => {
+            const slide = project.slides.find(sl => sl.id === s.slideId);
+            return { ...s, _slideOrder: slide?.order ?? -1 };
+          });
+          handleSlideChange(msg.slideIndex, sigsWithOrder);
           break;
         }
 
         case 'draw': {
           if (ws.role !== 'tablet') return;
-          sendToDisplay({
-            type: 'draw',
-            signId: ws.signId,
-            x: msg.x,
-            y: msg.y,
-            action: msg.action
-          });
+          sendToDisplay({ type: 'draw', signId: ws.signId, x: msg.x, y: msg.y, action: msg.action });
           break;
         }
 
@@ -101,21 +109,17 @@ export function createWebSocketServer(server) {
 
     ws.on('close', () => {
       const conns = getConnections();
-      if (ws.role === 'display') {
-        // Only unregister if this WS is still the registered display
-        if (conns.display === ws) unregisterDisplay();
-      } else if (ws.role === 'tablet' && ws.signId) {
-        // Only unregister if this WS is still the registered tablet for this signId
-        if (conns.tablets[ws.signId] === ws) unregisterTablet(ws.signId);
+      if (ws.role === 'display' && conns.display === ws) {
+        unregisterDisplay();
+      } else if (ws.role === 'tablet' && ws.signId && conns.tablets[ws.signId] === ws) {
+        unregisterTablet(ws.signId);
       }
     });
 
-    ws.on('error', () => {
-      ws.terminate();
-    });
+    ws.on('error', () => ws.terminate());
   });
 
-  // 연결 상태 주기적 체크 (heartbeat)
+  // Heartbeat
   const interval = setInterval(() => {
     wss.clients.forEach(ws => {
       if (!ws.isAlive) return ws.terminate();
@@ -125,6 +129,5 @@ export function createWebSocketServer(server) {
   }, 30000);
 
   wss.on('close', () => clearInterval(interval));
-
   return wss;
 }

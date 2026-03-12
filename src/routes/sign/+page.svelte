@@ -1,47 +1,62 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { session } from '$lib/stores/session.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
-  // ── Signatories ──────────────────────────────────────────────────────────────
-  const SIGNATORIES = [
-    { id: 'sign1', order: 1, title: '사장',     name: '박상형', slideIndex: 6 },
-    { id: 'sign2', order: 2, title: '노조위원장', name: '박종섭', slideIndex: 7 },
-    { id: 'sign3', order: 3, title: '부사장',    name: '김용호', slideIndex: 8 },
-    { id: 'sign4', order: 4, title: '본부장',    name: '정수옥', slideIndex: 9 },
-  ];
-
   // ── State ─────────────────────────────────────────────────────────────────────
-  let view = $state('login'); // 'login' | 'signing' | 'done'
-  let errorMsg = $state('');
-  let connectedTablets = $state({}); // signId → bool
-  let activeSignId = $state(null);   // which tablet is currently active (from server)
-  let signDone = $state(false);
+  let activeProject  = $state(null);   // loaded from /api/active
+  let loadError      = $state('');
+  let view           = $state('login'); // 'login' | 'signing' | 'done'
+  let errorMsg       = $state('');
+  let connectedTablets = $state({});
+  let activeSignId   = $state(null);
+  let signDone       = $state(false);
 
   // Canvas
   let canvasEl = $state(null);
-  let ctx = $derived.by(() => {
-    if (!canvasEl) return null;
-    const c = canvasEl.getContext('2d');
-    c.lineWidth = 6;
-    c.lineCap = 'round';
-    c.lineJoin = 'round';
-    c.strokeStyle = '#1a1a2e';
-    return c;
-  });
-
   let isDrawing = $state(false);
   let lastX = 0;
   let lastY = 0;
 
-  // Derived: is it my turn?
-  let isMyTurn = $derived(
+  // 16ms draw throttle
+  let lastDrawSent = 0;
+  const DRAW_INTERVAL = 16;
+
+  // ── Derived ──────────────────────────────────────────────────────────────────
+  const signatories = $derived(activeProject?.signatories ?? []);
+  const mySignatory = $derived(
+    activeProject?.signatories?.find(s => s.id === session.data?.signId) ?? null
+  );
+  const isMyTurn    = $derived(
     session.data !== null && activeSignId === session.data.signId
   );
 
-  // ── Login: select signatory ───────────────────────────────────────────────────
+  function getCtx() {
+    if (!canvasEl) return null;
+    const c = canvasEl.getContext('2d');
+    c.lineWidth   = 6;
+    c.lineCap     = 'round';
+    c.lineJoin    = 'round';
+    c.strokeStyle = '#1a1a2e';
+    return c;
+  }
+
+  // ── Fetch active project ──────────────────────────────────────────────────
+  async function loadActiveProject() {
+    try {
+      const res = await fetch(`${API_BASE}/api/active`);
+      if (!res.ok) { loadError = '서버에 연결할 수 없습니다.'; return; }
+      const data = await res.json();
+      if (!data?.id) { loadError = ''; activeProject = null; return; }
+      activeProject = data;
+      loadError = '';
+    } catch {
+      loadError = '서버에 연결할 수 없습니다.';
+    }
+  }
+
+  // ── Login: select signatory ───────────────────────────────────────────────
   function selectSignatory(sig) {
     errorMsg = '';
     session.save({ signId: sig.id, title: sig.title, name: sig.name, order: sig.order });
@@ -54,7 +69,7 @@
     signDone = false;
   }
 
-  // ── Logout ────────────────────────────────────────────────────────────────────
+  // ── Logout ────────────────────────────────────────────────────────────────
   function logout() {
     wsStore.disconnect();
     session.clear();
@@ -64,40 +79,49 @@
     activeSignId = null;
     connectedTablets = {};
     if (canvasEl) {
-      const c = canvasEl.getContext('2d');
-      c.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
     }
   }
 
-  // ── Drawing (Pointer Events) ──────────────────────────────────────────────────
+  // ── Drawing ───────────────────────────────────────────────────────────────
   function onPointerDown(e) {
     if (!isMyTurn || !canvasEl) return;
     e.preventDefault();
     canvasEl.setPointerCapture(e.pointerId);
     isDrawing = true;
-    const x = e.offsetX / canvasEl.clientWidth;
-    const y = e.offsetY / canvasEl.clientHeight;
-    lastX = e.offsetX * (canvasEl.width / canvasEl.clientWidth);
+    lastX = e.offsetX * (canvasEl.width  / canvasEl.clientWidth);
     lastY = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
+    const ctx = getCtx();
     ctx?.beginPath();
     ctx?.moveTo(lastX, lastY);
+    const x = e.offsetX / canvasEl.clientWidth;
+    const y = e.offsetY / canvasEl.clientHeight;
     wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'start' });
   }
 
   function onPointerMove(e) {
-    if (!isDrawing || !isMyTurn || !canvasEl || !ctx) return;
+    if (!isDrawing || !isMyTurn || !canvasEl) return;
     e.preventDefault();
-    const x = e.offsetX / canvasEl.clientWidth;
-    const y = e.offsetY / canvasEl.clientHeight;
-    const px = e.offsetX * (canvasEl.width / canvasEl.clientWidth);
+    const px = e.offsetX * (canvasEl.width  / canvasEl.clientWidth);
     const py = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(px, py);
-    ctx.stroke();
+    const ctx = getCtx();
+    if (ctx) {
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+    }
     lastX = px;
     lastY = py;
-    wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'move' });
+
+    // WS 전송은 16ms(~60fps) 스로틀
+    const now = Date.now();
+    if (now - lastDrawSent >= DRAW_INTERVAL) {
+      const x = e.offsetX / canvasEl.clientWidth;
+      const y = e.offsetY / canvasEl.clientHeight;
+      wsStore.send({ type: 'draw', signId: session.data.signId, x, y, action: 'move' });
+      lastDrawSent = now;
+    }
   }
 
   function onPointerUp(e) {
@@ -109,8 +133,8 @@
   }
 
   function clearSignature() {
-    if (!canvasEl || !ctx) return;
-    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    if (!canvasEl) return;
+    canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
     wsStore.send({ type: 'sign_clear', signId: session.data.signId });
   }
 
@@ -119,17 +143,22 @@
     signDone = true;
   }
 
-  // ── WebSocket handlers ────────────────────────────────────────────────────────
-  let cleanups = [];
+  // ── WebSocket handlers ────────────────────────────────────────────────────
+  let wsCleanups = [];
 
   function setupHandlers() {
-    cleanups.push(wsStore.on('identified', (msg) => {
+    wsCleanups.push(wsStore.on('identified', (msg) => {
+      if (msg.project) activeProject = msg.project;
       if (msg.activeSignId !== undefined) activeSignId = msg.activeSignId;
     }));
 
-    cleanups.push(wsStore.on('rejected', (msg) => {
+    wsCleanups.push(wsStore.on('rejected', (msg) => {
       const reason = msg.reason === 'tablet_occupied'
         ? '이미 해당 서명자로 다른 기기가 연결되어 있습니다.'
+        : msg.reason === 'no_active_project'
+        ? '활성 프로젝트가 없습니다. 관리자에게 문의해주세요.'
+        : msg.reason === 'invalid_signatory'
+        ? '유효하지 않은 서명자입니다. 다시 선택해주세요.'
         : '연결이 거부되었습니다.';
       session.clear();
       wsStore.disconnect();
@@ -137,59 +166,62 @@
       errorMsg = reason;
     }));
 
-    cleanups.push(wsStore.on('connection_status', (msg) => {
+    wsCleanups.push(wsStore.on('connection_status', (msg) => {
       connectedTablets = msg.tablets ?? {};
     }));
 
-    cleanups.push(wsStore.on('slide', (msg) => {
+    wsCleanups.push(wsStore.on('slide', (msg) => {
       activeSignId = msg.activeSignId ?? null;
     }));
 
-    cleanups.push(wsStore.on('sign_clear', (msg) => {
-      // Optionally handle remote clear (for display page; tablet doesn't need this)
-    }));
-
-    cleanups.push(wsStore.on('force_disconnect', () => {
+    wsCleanups.push(wsStore.on('force_disconnect', () => {
       session.clear();
       wsStore.disconnect();
       view = 'login';
       errorMsg = '관리자에 의해 연결이 해제되었습니다. 다시 선택해주세요.';
       activeSignId = null;
     }));
+
+    // 활성 프로젝트 변경 → 자동 리로드
+    wsCleanups.push(wsStore.on('active_changed', () => {
+      window.location.reload();
+    }));
   }
 
   function teardownHandlers() {
-    cleanups.forEach(fn => fn());
-    cleanups = [];
+    wsCleanups.forEach(fn => fn());
+    wsCleanups = [];
   }
 
-  // ── Send identify whenever WS connects ──────────────────────────────────────
   $effect(() => {
     if (wsStore.status === 'connected' && view === 'signing' && session.data) {
       wsStore.send({ type: 'identify_tablet', signId: session.data.signId });
     }
   });
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   onMount(async () => {
     setupHandlers();
+    await loadActiveProject();
 
-    // Fetch initial connection status so login screen shows correct availability
+    // 초기 연결 상태 조회
     try {
       const res = await fetch(`${API_BASE}/api/status`);
       if (res.ok) {
         const data = await res.json();
         connectedTablets = data.tablets ?? {};
-        if (data.currentActiveSignId !== undefined) {
-          activeSignId = data.currentActiveSignId;
-        }
+        if (data.currentActiveSignId !== undefined) activeSignId = data.currentActiveSignId;
       }
     } catch {}
 
-    // Restore session
+    // 세션 복원: signId가 현재 프로젝트에 존재하는지 확인
     if (session.hasSession) {
-      view = 'signing';
-      connectAndIdentify();
+      const validSignId = activeProject?.signatories?.some(s => s.id === session.data?.signId);
+      if (validSignId) {
+        connectAndIdentify();
+      } else {
+        session.clear();  // 프로젝트 변경으로 무효한 세션
+      }
     }
 
     return () => {
@@ -203,7 +235,7 @@
 </svelte:head>
 
 {#if view === 'login'}
-  <!-- ── LOGIN ── -->
+  <!-- ── 서명자 선택 화면 ── -->
   <div class="page login-page">
     <div class="login-container">
       <div class="login-header">
@@ -212,52 +244,65 @@
         <p class="login-sub">서명하실 역할을 선택해주세요</p>
       </div>
 
-      {#if errorMsg}
-        <div class="error-banner">
-          <span>⚠</span> {errorMsg}
-        </div>
+      {#if loadError}
+        <div class="error-banner">⚠ {loadError}</div>
       {/if}
 
-      <div class="sign-list">
-        {#each SIGNATORIES as sig}
-          {@const isConnected = connectedTablets[sig.id] === true}
-          <button
-            class="sign-item"
-            class:occupied={isConnected}
-            disabled={isConnected}
-            onclick={() => selectSignatory(sig)}
-          >
-            <div class="sign-item-info">
-              <span class="sign-order">{sig.order}</span>
-              <div class="sign-text">
-                <span class="sign-title">{sig.title}</span>
-                <span class="sign-name">{sig.name}</span>
+      {#if errorMsg}
+        <div class="error-banner">⚠ {errorMsg}</div>
+      {/if}
+
+      {#if !activeProject}
+        <div class="wait-notice">
+          <div class="spinner"></div>
+          <p>{loadError ? '새로고침을 눌러주세요.' : '활성 프로젝트를 불러오는 중…'}</p>
+        </div>
+      {:else if signatories.length === 0}
+        <div class="wait-notice">
+          <p>서명자가 설정되지 않았습니다.</p>
+          <p class="sub">관리자에게 문의해주세요.</p>
+        </div>
+      {:else}
+        <div class="sign-list">
+          {#each signatories as sig (sig.id)}
+            {@const isConnected = connectedTablets[sig.id] === true}
+            <button
+              class="sign-item"
+              class:occupied={isConnected}
+              disabled={isConnected}
+              onclick={() => selectSignatory(sig)}
+            >
+              <div class="sign-item-info">
+                <span class="sign-order">{sig.order}</span>
+                <div class="sign-text">
+                  <span class="sign-title">{sig.title}</span>
+                  <span class="sign-name">{sig.name}</span>
+                </div>
               </div>
-            </div>
-            {#if isConnected}
-              <span class="badge-connected">연결됨</span>
-            {:else}
-              <span class="badge-select">선택 →</span>
-            {/if}
-          </button>
-        {/each}
-      </div>
+              {#if isConnected}
+                <span class="badge-connected">연결됨</span>
+              {:else}
+                <span class="badge-select">선택 →</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 
 {:else if view === 'signing'}
-  <!-- ── SIGNING ── -->
+  <!-- ── 서명 화면 ── -->
   <div class="page signing-page">
 
-    <!-- Top bar -->
+    <!-- 상단 바 -->
     <div class="top-bar">
       <div class="signer-info">
         <span class="signer-title">{session.data?.title ?? ''}</span>
         <span class="signer-name">{session.data?.name ?? ''}</span>
       </div>
       <div class="top-bar-right">
-        <!-- WS status dot -->
-        <div class="ws-status" title={wsStore.status}>
+        <div class="ws-status">
           <span class="ws-dot" class:connected={wsStore.status === 'connected'}></span>
           <span class="ws-label">
             {#if wsStore.status === 'connected'}연결됨{:else if wsStore.status === 'connecting'}연결 중…{:else}미연결{/if}
@@ -268,7 +313,7 @@
     </div>
 
     {#if signDone}
-      <!-- Completion screen -->
+      <!-- 완료 화면 -->
       <div class="done-screen">
         <div class="done-icon">✓</div>
         <h2>서명 완료</h2>
@@ -277,7 +322,7 @@
       </div>
 
     {:else}
-      <!-- Status banner -->
+      <!-- 상태 배너 -->
       <div class="status-banner" class:active={isMyTurn}>
         {#if isMyTurn}
           <span class="status-dot blink"></span>
@@ -288,7 +333,7 @@
         {/if}
       </div>
 
-      <!-- Canvas area -->
+      <!-- 캔버스 영역 -->
       <div class="canvas-wrap">
         <canvas
           bind:this={canvasEl}
@@ -313,27 +358,19 @@
         {/if}
       </div>
 
-      <!-- Action buttons -->
+      <!-- 버튼 -->
       <div class="action-row">
-        <button
-          class="action-btn clear-btn"
-          disabled={!isMyTurn}
-          onclick={clearSignature}
-        >
+        <button class="action-btn clear-btn" disabled={!isMyTurn} onclick={clearSignature}>
           다시 서명
         </button>
-        <button
-          class="action-btn done-btn"
-          disabled={!isMyTurn}
-          onclick={completeSignature}
-        >
+        <button class="action-btn done-btn" disabled={!isMyTurn} onclick={completeSignature}>
           서명 완료
         </button>
       </div>
 
       <p class="hint-text">
         {#if isMyTurn}
-          위 영역에 서명해주세요. 서명이 완료되면 "서명 완료" 버튼을 눌러주세요.
+          위 영역에 서명 후 "서명 완료" 버튼을 눌러주세요.
         {:else}
           PC 화면의 슬라이드가 해당 서약서 페이지로 이동하면 서명이 활성화됩니다.
         {/if}
@@ -343,27 +380,26 @@
 {/if}
 
 <style>
+  :global(body) { margin: 0; font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; }
+
   .page {
     width: 100vw;
     min-height: 100vh;
     background: radial-gradient(ellipse at top, #12121a 0%, #0a0a0f 60%);
+    color: #e8e0d0;
     display: flex;
     flex-direction: column;
   }
 
   /* ── LOGIN ── */
-  .login-page {
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
-  }
+  .login-page { align-items: center; justify-content: center; padding: 40px 20px; }
 
   .login-container {
     width: 100%;
     max-width: 500px;
     display: flex;
     flex-direction: column;
-    gap: 28px;
+    gap: 24px;
   }
 
   .login-header {
@@ -386,16 +422,8 @@
     background: rgba(201, 168, 76, 0.06);
   }
 
-  .login-header h1 {
-    font-size: 28px;
-    font-weight: 700;
-    color: #f0e8d8;
-  }
-
-  .login-sub {
-    font-size: 14px;
-    color: rgba(232, 224, 208, 0.45);
-  }
+  .login-header h1 { font-size: 28px; font-weight: 700; color: #f0e8d8; margin: 0; }
+  .login-sub { font-size: 14px; color: rgba(232, 224, 208, 0.45); margin: 0; }
 
   .error-banner {
     background: rgba(200, 60, 60, 0.12);
@@ -404,16 +432,35 @@
     padding: 14px 16px;
     font-size: 14px;
     color: #e07070;
-    display: flex;
-    align-items: center;
-    gap: 8px;
   }
 
-  .sign-list {
+  .wait-notice {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 12px;
+    padding: 32px;
+    text-align: center;
+    color: rgba(232, 224, 208, 0.45);
+    font-size: 14px;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
   }
+
+  .wait-notice .sub { font-size: 12px; color: rgba(232, 224, 208, 0.3); margin: 0; }
+
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border: 2.5px solid rgba(201, 168, 76, 0.15);
+    border-top-color: #c9a84c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .sign-list { display: flex; flex-direction: column; gap: 12px; }
 
   .sign-item {
     display: flex;
@@ -436,16 +483,9 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   }
 
-  .sign-item.occupied {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
+  .sign-item.occupied { opacity: 0.45; cursor: not-allowed; }
 
-  .sign-item-info {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
+  .sign-item-info { display: flex; align-items: center; gap: 16px; }
 
   .sign-order {
     width: 32px;
@@ -462,23 +502,9 @@
     flex-shrink: 0;
   }
 
-  .sign-text {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    text-align: left;
-  }
-
-  .sign-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: #f0e8d8;
-  }
-
-  .sign-name {
-    font-size: 13px;
-    color: rgba(232, 224, 208, 0.5);
-  }
+  .sign-text { display: flex; flex-direction: column; gap: 3px; text-align: left; }
+  .sign-title { font-size: 15px; font-weight: 600; color: #f0e8d8; }
+  .sign-name  { font-size: 13px; color: rgba(232, 224, 208, 0.5); }
 
   .badge-connected {
     font-size: 12px;
@@ -490,15 +516,10 @@
     border-radius: 12px;
   }
 
-  .badge-select {
-    font-size: 13px;
-    color: rgba(201, 168, 76, 0.7);
-  }
+  .badge-select { font-size: 13px; color: rgba(201, 168, 76, 0.7); }
 
   /* ── SIGNING ── */
-  .signing-page {
-    padding: 0;
-  }
+  .signing-page { padding: 0; }
 
   .top-bar {
     display: flex;
@@ -513,11 +534,7 @@
     z-index: 20;
   }
 
-  .signer-info {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
+  .signer-info { display: flex; align-items: baseline; gap: 10px; }
 
   .signer-title {
     font-size: 13px;
@@ -529,41 +546,13 @@
     border-radius: 12px;
   }
 
-  .signer-name {
-    font-size: 20px;
-    font-weight: 700;
-    color: #f0e8d8;
-  }
+  .signer-name { font-size: 20px; font-weight: 700; color: #f0e8d8; }
+  .top-bar-right { display: flex; align-items: center; gap: 16px; }
 
-  .top-bar-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .ws-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .ws-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #555;
-    transition: background 0.3s;
-  }
-
-  .ws-dot.connected {
-    background: #4caf50;
-    box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
-  }
-
-  .ws-label {
-    font-size: 12px;
-    color: rgba(232, 224, 208, 0.5);
-  }
+  .ws-status { display: flex; align-items: center; gap: 6px; }
+  .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; transition: background 0.3s; }
+  .ws-dot.connected { background: #4caf50; box-shadow: 0 0 6px rgba(76, 175, 80, 0.5); }
+  .ws-label { font-size: 12px; color: rgba(232, 224, 208, 0.5); }
 
   .logout-btn {
     background: rgba(255, 255, 255, 0.06);
@@ -573,15 +562,12 @@
     font-size: 13px;
     padding: 8px 16px;
     font-family: inherit;
+    cursor: pointer;
     transition: all 0.2s;
   }
 
-  .logout-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #f0e8d8;
-  }
+  .logout-btn:hover { background: rgba(255, 255, 255, 0.1); color: #f0e8d8; }
 
-  /* ── Status banner ── */
   .status-banner {
     display: flex;
     align-items: center;
@@ -602,28 +588,15 @@
     color: #c9a84c;
   }
 
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .status-dot.waiting {
-    background: #555;
-  }
-
-  .status-dot.blink {
-    background: #c9a84c;
-    animation: pulse-dot 1.2s infinite;
-  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.waiting { background: #555; }
+  .status-dot.blink { background: #c9a84c; animation: pulse-dot 1.2s infinite; }
 
   @keyframes pulse-dot {
     0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.5); }
-    50% { opacity: 0.7; box-shadow: 0 0 0 5px rgba(201, 168, 76, 0); }
+    50%       { opacity: 0.7; box-shadow: 0 0 0 5px rgba(201, 168, 76, 0); }
   }
 
-  /* ── Canvas area ── */
   .canvas-wrap {
     position: relative;
     width: calc(100% - 40px);
@@ -636,17 +609,8 @@
     border: 2px solid rgba(255, 255, 255, 0.12);
   }
 
-  .sig-canvas {
-    width: 100%;
-    height: 100%;
-    display: block;
-    touch-action: none;
-    cursor: crosshair;
-  }
-
-  .sig-canvas.inactive {
-    cursor: not-allowed;
-  }
+  .sig-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .sig-canvas.inactive { cursor: not-allowed; }
 
   .waiting-overlay {
     position: absolute;
@@ -659,37 +623,12 @@
     border-radius: 12px;
   }
 
-  .waiting-content {
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-  }
+  .waiting-content { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .waiting-icon { font-size: 36px; opacity: 0.7; }
+  .waiting-content p { font-size: 16px; font-weight: 600; color: rgba(232, 224, 208, 0.85); margin: 0; }
+  .waiting-sub { font-size: 13px !important; color: rgba(232, 224, 208, 0.45) !important; font-weight: 400 !important; }
 
-  .waiting-icon {
-    font-size: 36px;
-    opacity: 0.7;
-  }
-
-  .waiting-content p {
-    font-size: 16px;
-    font-weight: 600;
-    color: rgba(232, 224, 208, 0.85);
-  }
-
-  .waiting-sub {
-    font-size: 13px !important;
-    color: rgba(232, 224, 208, 0.45) !important;
-    font-weight: 400 !important;
-  }
-
-  /* ── Action buttons ── */
-  .action-row {
-    display: flex;
-    gap: 12px;
-    padding: 20px 20px 8px;
-  }
+  .action-row { display: flex; gap: 12px; padding: 20px 20px 8px; }
 
   .action-btn {
     flex: 1;
@@ -702,10 +641,7 @@
     cursor: pointer;
   }
 
-  .action-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
+  .action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
   .clear-btn {
     background: rgba(255, 255, 255, 0.05);
@@ -713,10 +649,7 @@
     color: rgba(232, 224, 208, 0.7);
   }
 
-  .clear-btn:not(:disabled):hover {
-    background: rgba(255, 255, 255, 0.09);
-    border-color: rgba(255, 255, 255, 0.2);
-  }
+  .clear-btn:not(:disabled):hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.2); }
 
   .done-btn {
     background: rgba(201, 168, 76, 0.15);
@@ -730,13 +663,7 @@
     box-shadow: 0 4px 16px rgba(201, 168, 76, 0.2);
   }
 
-  .hint-text {
-    padding: 0 20px 20px;
-    font-size: 13px;
-    color: rgba(232, 224, 208, 0.35);
-    text-align: center;
-    line-height: 1.5;
-  }
+  .hint-text { padding: 0 20px 20px; font-size: 13px; color: rgba(232, 224, 208, 0.35); text-align: center; line-height: 1.5; }
 
   /* ── Done screen ── */
   .done-screen {
@@ -763,16 +690,8 @@
     justify-content: center;
   }
 
-  .done-screen h2 {
-    font-size: 26px;
-    font-weight: 700;
-    color: #f0e8d8;
-  }
-
-  .done-screen p {
-    font-size: 15px;
-    color: rgba(232, 224, 208, 0.55);
-  }
+  .done-screen h2 { font-size: 26px; font-weight: 700; color: #f0e8d8; margin: 0; }
+  .done-screen p  { font-size: 15px; color: rgba(232, 224, 208, 0.55); margin: 0; }
 
   .gold-btn {
     margin-top: 8px;
@@ -788,8 +707,5 @@
     transition: all 0.2s;
   }
 
-  .gold-btn:hover {
-    background: rgba(201, 168, 76, 0.25);
-    border-color: #c9a84c;
-  }
+  .gold-btn:hover { background: rgba(201, 168, 76, 0.25); border-color: #c9a84c; }
 </style>

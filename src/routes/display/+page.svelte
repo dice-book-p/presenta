@@ -1,92 +1,88 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
+  import { tick } from 'svelte';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
-  // ── Slides ──────────────────────────────────────────────────────────────────
-  const SLIDES = [
-    '/img/1.jpg',
-    '/img/2.jpg',
-    '/img/3.jpg',
-    '/img/4.jpg',
-    '/img/4-1.jpg',
-    '/img/5.jpg',
-    '/img/5-1-사장.jpg',       // index 6
-    '/img/5-2-노조위원장.jpg',  // index 7
-    '/img/5-3-부사장1.jpg',    // index 8
-    '/img/5-4-본부장.jpg',     // index 9
-    '/img/6.jpg',
-    '/img/6-1.jpg',
-    '/img/7.jpg',
-    '/img/7-1.jpg',
-    '/img/8.jpg',
-    '/img/9.jpg',
-  ];
-
-  // ── Signatories ─────────────────────────────────────────────────────────────
-  // canvasArea: 개별 서명 슬라이드에서의 위치 (이미지 기준 %)
-  // summaryArea: 종합 서약서 슬라이드(index 11)에서의 위치 (이미지 기준 %)
-  // left/right/top/width/height 모두 % 단위 → 브라우저 크기에 동적 대응
-  const SIGNATORIES = [
-    { id: 'sign1', order: 1, title: '사장',     name: '박상형', slideIndex: 6,
-      canvasArea:  { top: '76%', right: '14%',   width: '17%',   height: '10%' },
-      summaryArea: { top: '78.1%', left: '50.9%', width: '16.1%', height: '9.1%' } },
-    { id: 'sign2', order: 2, title: '노조위원장', name: '박종섭', slideIndex: 7,
-      canvasArea:  { top: '76%', right: '14%',   width: '17%',   height: '10%' },
-      summaryArea: { top: '78.1%', left: '32.5%', width: '16.1%', height: '9.1%' } },
-    { id: 'sign3', order: 3, title: '부사장',    name: '김용호', slideIndex: 8,
-      canvasArea:  { top: '76%', right: '14%',   width: '17%',   height: '10%' },
-      summaryArea: { top: '78.1%', left: '69.4%', width: '16.1%', height: '9.1%' } },
-    { id: 'sign4', order: 4, title: '본부장',    name: '정수옥', slideIndex: 9,
-      canvasArea:  { top: '76%', right: '14%',   width: '17%',   height: '10%' },
-      summaryArea: { top: '78.1%', left: '14.5%', width: '16.1%', height: '9.1%' } },
-  ];
-
-  // 종합 서약서 슬라이드 index
-  const SUMMARY_SLIDE_INDEX = 11;
-
-  // ── State ────────────────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────────
+  let project      = $state(null);
   let currentSlide = $state(0);
-  let rejected = $state(false);
+  let rejected     = $state(false);
   let rejectReason = $state('');
-  let identified = $state(false);
+  let identified   = $state(false);
+  let noProject    = $state(false);  // active project not set
 
-  // signId → canvas element map (populated in onMount)
-  let canvasRefs = $state({});
-  // signId → CanvasRenderingContext2D
-  let ctxMap = {};
-
-  // Pointer state per canvas for draw
-  let drawingState = {}; // signId → { lastX, lastY }
-
-  // Sign slide indices (for showing canvases)
-  const SIGN_SLIDE_INDICES = new Set(SIGNATORIES.map(s => s.slideIndex));
+  // sig.id → canvas element (populated by bind:this)
+  let canvasRefs   = $state({});
+  // sig.id → CanvasRenderingContext2D
+  let ctxMap       = {};
+  // sig.id → { lastX, lastY }
+  let drawingState = {};
 
   // ── Derived ──────────────────────────────────────────────────────────────────
-  let isSignSlide = $derived(SIGN_SLIDE_INDICES.has(currentSlide));
-  let currentSignatory = $derived(SIGNATORIES.find(s => s.slideIndex === currentSlide) ?? null);
-  let isSummarySlide = $derived(currentSlide === SUMMARY_SLIDE_INDEX);
+  const sortedSlides = $derived(
+    [...(project?.slides ?? [])].sort((a, b) => a.order - b.order)
+  );
+  const currentSlideObj = $derived(sortedSlides[currentSlide] ?? null);
+  const isSummarySlide  = $derived(
+    !!project?.summarySlideId && currentSlideObj?.id === project.summarySlideId
+  );
 
-  // ── Canvas helpers ────────────────────────────────────────────────────────────
-  function getCtx(signId) {
-    if (ctxMap[signId]) return ctxMap[signId];
-    const canvas = canvasRefs[signId];
+  // ── ±2 preload ──────────────────────────────────────────────────────────────
+  let preloadedUrls = new Set();
+
+  $effect(() => {
+    const slides = sortedSlides;
+    if (!slides.length) return;
+    for (let i = Math.max(0, currentSlide - 2); i <= Math.min(slides.length - 1, currentSlide + 2); i++) {
+      const url = slides[i]?.url;
+      if (url && !preloadedUrls.has(url)) {
+        const img = new Image();
+        img.src = url;
+        preloadedUrls.add(url);
+      }
+    }
+  });
+
+  // ── Canvas helpers ─────────────────────────────────────────────────────────
+  function getCtx(sig) {
+    if (ctxMap[sig.id]) return ctxMap[sig.id];
+    const canvas = canvasRefs[sig.id];
     if (!canvas) return null;
     const ctx = canvas.getContext('2d');
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#c9a84c';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 3;
-    ctxMap[signId] = ctx;
+    ctx.lineWidth   = 6;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+    ctx.strokeStyle = sig.color || '#ffffff';
+    ctx.shadowColor = 'rgba(0,0,0,0.65)';
+    ctx.shadowBlur  = 3;
+    ctxMap[sig.id]  = ctx;
     return ctx;
   }
 
+  function getCanvasArea(sig) {
+    return isSummarySlide ? (sig.summaryArea ?? sig.canvasArea) : sig.canvasArea;
+  }
+
+  function isCanvasVisible(sig) {
+    if (!project) return false;
+    return isSummarySlide || currentSlideObj?.id === sig.slideId;
+  }
+
+  function areaStyle(area) {
+    if (!area) return '';
+    // Support both left-based and right-based (legacy) positioning
+    const left = area.left
+      ?? (area.right ? `calc(100% - ${area.right} - ${area.width})` : '0%');
+    return `top:${area.top};left:${left};width:${area.width};height:${area.height}`;
+  }
+
   function handleDraw(msg) {
+    const sig = project?.signatories?.find(s => s.id === msg.signId);
+    if (!sig) return;
     const canvas = canvasRefs[msg.signId];
     if (!canvas) return;
-    const ctx = getCtx(msg.signId);
+    const ctx = getCtx(sig);
     if (!ctx) return;
 
     const px = msg.x * canvas.width;
@@ -113,16 +109,17 @@
   function clearCanvas(signId) {
     const canvas = canvasRefs[signId];
     if (!canvas) return;
-    const ctx = getCtx(signId);
+    const ctx = ctxMap[signId];
     if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
   async function saveSignatureToServer(signId) {
+    if (!project) return;
     const canvas = canvasRefs[signId];
     if (!canvas) return;
     const dataUrl = canvas.toDataURL('image/png');
     try {
-      await fetch(`${API_BASE}/api/signatures`, {
+      await fetch(`${API_BASE}/api/projects/${project.id}/signatures`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signId, dataUrl }),
@@ -131,17 +128,20 @@
   }
 
   async function restoreSignatures() {
+    if (!project) return;
     try {
-      const res = await fetch(`${API_BASE}/api/signatures`);
+      const res = await fetch(`${API_BASE}/api/projects/${project.id}/signatures`);
       if (!res.ok) return;
       const saved = await res.json();
       for (const [signId, dataUrl] of Object.entries(saved)) {
         if (!dataUrl) continue;
         const canvas = canvasRefs[signId];
         if (!canvas) continue;
+        const sig = project.signatories.find(s => s.id === signId);
+        if (!sig) continue;
         const img = new Image();
         img.onload = () => {
-          const ctx = getCtx(signId);
+          const ctx = getCtx(sig);
           if (ctx) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         };
         img.src = dataUrl;
@@ -149,69 +149,72 @@
     } catch {}
   }
 
-  // ── Keyboard navigation ──────────────────────────────────────────────────────
+  // ── Navigation ────────────────────────────────────────────────────────────
+  function goToSlide(idx) {
+    if (!sortedSlides.length) return;
+    const newIdx = Math.max(0, Math.min(sortedSlides.length - 1, idx));
+    if (newIdx === currentSlide) return;
+    currentSlide = newIdx;
+    wsStore.send({ type: 'slide_change', slideIndex: sortedSlides[newIdx].order });
+  }
+
   function handleKeyDown(e) {
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
-      e.preventDefault();
-      if (currentSlide < SLIDES.length - 1) {
-        currentSlide++;
-        wsStore.send({ type: 'slide_change', slideIndex: currentSlide });
-      }
+      e.preventDefault(); goToSlide(currentSlide + 1);
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (currentSlide > 0) {
-        currentSlide--;
-        wsStore.send({ type: 'slide_change', slideIndex: currentSlide });
-      }
+      e.preventDefault(); goToSlide(currentSlide - 1);
     } else if (e.key === 'f' || e.key === 'F') {
       document.documentElement.requestFullscreen?.();
     }
   }
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   onMount(() => {
     window.addEventListener('keydown', handleKeyDown);
-
-    // Connect WebSocket
     wsStore.connect();
 
-    // Restore persisted signatures from server
-    restoreSignatures();
+    const unsubs = [];
 
-    // Wait for connection then identify
-    const unsubConnected = wsStore.on('identified', (msg) => {
+    unsubs.push(wsStore.on('identified', async (msg) => {
       identified = true;
-    });
-
-    const unsubRejected = wsStore.on('rejected', (msg) => {
-      rejected = true;
-      rejectReason = msg.reason === 'display_occupied'
-        ? '이미 다른 슬라이드쇼 화면이 연결되어 있습니다.'
-        : '연결이 거부되었습니다.';
-    });
-
-    const unsubStatus = wsStore.on('connection_status', () => {});
-
-    const unsubSlide = wsStore.on('slide', (msg) => {
-      // server-driven slide change (not used for display normally, but handle it)
-    });
-
-    const unsubDraw = wsStore.on('draw', handleDraw);
-
-    const unsubSignDone = wsStore.on('sign_done', (msg) => {
-      // 서명 완료 → 서버에 저장 후 다음 슬라이드로 자동 전환
-      saveSignatureToServer(msg.signId);
-      if (currentSlide < SLIDES.length - 1) {
-        currentSlide++;
-        wsStore.send({ type: 'slide_change', slideIndex: currentSlide });
+      if (msg.project) {
+        project = msg.project;
+        noProject = false;
+        ctxMap = {};  // reset ctx cache on project load
+        await tick(); // wait for canvas elements to bind
+        restoreSignatures();
       }
-    });
+    }));
 
-    const unsubSignClear = wsStore.on('sign_clear', (msg) => {
+    unsubs.push(wsStore.on('rejected', (msg) => {
+      rejected = true;
+      if (msg.reason === 'no_active_project') {
+        noProject = true;
+        rejectReason = '';
+      } else if (msg.reason === 'display_occupied') {
+        rejectReason = '이미 다른 슬라이드쇼 화면이 연결되어 있습니다.';
+      } else {
+        rejectReason = '연결이 거부되었습니다.';
+      }
+    }));
+
+    // 활성 프로젝트 변경 → 자동 리로드
+    unsubs.push(wsStore.on('active_changed', () => {
+      window.location.reload();
+    }));
+
+    unsubs.push(wsStore.on('draw', handleDraw));
+
+    unsubs.push(wsStore.on('sign_done', (msg) => {
+      saveSignatureToServer(msg.signId);
+      goToSlide(currentSlide + 1);
+    }));
+
+    unsubs.push(wsStore.on('sign_clear', (msg) => {
       clearCanvas(msg.signId);
-    });
+    }));
 
-    // Send identify when WS is connected (use polling via $effect-like watch)
+    // identify 전송 (연결 직후 & 재연결 시)
     let identifyInterval = setInterval(() => {
       if (wsStore.status === 'connected' && !identified && !rejected) {
         wsStore.send({ type: 'identify_display' });
@@ -221,100 +224,97 @@
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       clearInterval(identifyInterval);
-      unsubConnected();
-      unsubRejected();
-      unsubStatus();
-      unsubSlide();
-      unsubDraw();
-      unsubSignDone();
-      unsubSignClear();
+      unsubs.forEach(fn => fn());
       wsStore.disconnect();
     };
   });
 
-  // Re-send identify when connection state changes to connected
   $effect(() => {
     if (wsStore.status === 'connected' && !identified && !rejected) {
       wsStore.send({ type: 'identify_display' });
     }
   });
-
 </script>
 
 <svelte:head>
-  <title>슬라이드쇼 표출 — 한전KDN</title>
+  <title>슬라이드쇼 — 한전KDN</title>
 </svelte:head>
 
-{#if rejected}
-  <!-- Rejection screen -->
+<!-- 활성 프로젝트 없음 -->
+{#if noProject}
   <div class="fullscreen center">
-    <div class="reject-box">
-      <div class="reject-icon">⚠</div>
+    <div class="info-box">
+      <div class="info-icon">⏳</div>
+      <h2>대기 중</h2>
+      <p>활성 프로젝트가 없습니다.</p>
+      <p class="sub">관리자가 프로젝트를 활성화하면 자동으로 연결됩니다.</p>
+    </div>
+  </div>
+
+<!-- 연결 거부 -->
+{:else if rejected}
+  <div class="fullscreen center">
+    <div class="info-box">
+      <div class="info-icon">⚠</div>
       <h2>연결 거부됨</h2>
       <p>{rejectReason}</p>
-      <button class="gold-btn" onclick={() => { rejected = false; wsStore.connect(); }}>
+      <button class="gold-btn" onclick={() => { rejected = false; identified = false; wsStore.connect(); }}>
         다시 시도
       </button>
     </div>
   </div>
+
+<!-- 프로젝트 로딩 중 -->
+{:else if !project}
+  <div class="fullscreen center">
+    <div class="info-box">
+      <div class="spinner"></div>
+      <p>연결 중…</p>
+    </div>
+  </div>
+
+<!-- 슬라이드쇼 -->
 {:else}
-  <!-- Main display -->
   <div class="fullscreen slideshow">
-
-    <!-- 이미지 + 캔버스를 같은 비율 래퍼로 감싸서 좌표 정합성 확보 -->
     <div class="slide-wrapper">
-      <img
-        class="slide-img"
-        src={SLIDES[currentSlide]}
-        alt="슬라이드 {currentSlide + 1}"
-      />
+      <!-- 현재 슬라이드 이미지 -->
+      {#if currentSlideObj}
+        <img
+          class="slide-img"
+          src={currentSlideObj.url}
+          alt="슬라이드 {currentSlide + 1}"
+        />
+      {/if}
 
-      <!-- Signature canvas overlays (always mounted, visible on sign/summary slides) -->
-      {#each SIGNATORIES as sig (sig.id)}
-        {@const onIndividual = currentSlide === sig.slideIndex}
-        {@const onSummary = isSummarySlide}
-        {@const area = onSummary ? sig.summaryArea : sig.canvasArea}
+      <!-- 서명 캔버스 오버레이 (항상 마운트, visibility만 토글) -->
+      {#each project.signatories as sig (sig.id)}
+        {@const visible = isCanvasVisible(sig)}
+        {@const area = getCanvasArea(sig)}
         <canvas
           bind:this={canvasRefs[sig.id]}
           class="sig-canvas"
-          class:visible={onIndividual || onSummary}
-          style="
-            top: {area.top};
-            {area.left ? `left: ${area.left};` : `right: ${area.right};`}
-            width: {area.width};
-            height: {area.height};
-          "
+          class:visible={visible && !!area}
+          style={visible && area ? areaStyle(area) : ''}
           width="600"
           height="200"
         ></canvas>
       {/each}
     </div>
 
-    <!-- Slide counter (bottom-center) -->
+    <!-- 슬라이드 카운터 -->
     <div class="slide-counter">
-      {currentSlide + 1} / {SLIDES.length}
+      {currentSlide + 1} / {sortedSlides.length}
     </div>
 
-    <!-- Arrow navigation hints (래퍼 밖, slideshow 기준) -->
+    <!-- 이전/다음 버튼 -->
     <button
       class="nav-btn nav-prev"
-      onclick={() => {
-        if (currentSlide > 0) {
-          currentSlide--;
-          wsStore.send({ type: 'slide_change', slideIndex: currentSlide });
-        }
-      }}
+      onclick={() => goToSlide(currentSlide - 1)}
       aria-label="이전 슬라이드"
     >‹</button>
-
     <button
       class="nav-btn nav-next"
-      onclick={() => {
-        if (currentSlide < SLIDES.length - 1) {
-          currentSlide++;
-          wsStore.send({ type: 'slide_change', slideIndex: currentSlide });
-        }
-      }}
+      onclick={() => goToSlide(currentSlide + 1)}
       aria-label="다음 슬라이드"
     >›</button>
   </div>
@@ -334,6 +334,55 @@
     justify-content: center;
   }
 
+  /* ── Info / wait screens ── */
+  .info-box {
+    background: rgba(18, 18, 26, 0.95);
+    border: 1px solid rgba(201, 168, 76, 0.25);
+    border-radius: 16px;
+    padding: 48px 56px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    max-width: 400px;
+  }
+
+  .info-icon {
+    font-size: 40px;
+    color: #e5a44b;
+  }
+
+  .info-box h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f0e8d8;
+    margin: 0;
+  }
+
+  .info-box p {
+    font-size: 15px;
+    color: rgba(232, 224, 208, 0.6);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .info-box .sub {
+    font-size: 13px;
+    color: rgba(232, 224, 208, 0.35);
+  }
+
+  .spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(201, 168, 76, 0.15);
+    border-top-color: #c9a84c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   /* ── Slideshow ── */
   .slideshow {
     position: relative;
@@ -343,7 +392,6 @@
     background: #000;
   }
 
-  /* 슬라이드 이미지 래퍼 — 항상 전체화면 */
   .slide-wrapper {
     position: relative;
     width: 100vw;
@@ -408,48 +456,10 @@
     cursor: pointer;
   }
 
-  .slideshow:hover .nav-btn {
-    opacity: 1;
-  }
-
-  .nav-btn:hover {
-    color: rgba(232, 224, 208, 0.9);
-    background: rgba(10, 10, 15, 0.75);
-  }
-
+  .slideshow:hover .nav-btn { opacity: 1; }
+  .nav-btn:hover { color: rgba(232, 224, 208, 0.9); background: rgba(10, 10, 15, 0.75); }
   .nav-prev { left: 16px; }
   .nav-next { right: 16px; }
-
-  /* ── Rejection screen ── */
-  .reject-box {
-    background: rgba(18, 18, 26, 0.95);
-    border: 1px solid rgba(201, 168, 76, 0.25);
-    border-radius: 16px;
-    padding: 48px 56px;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    max-width: 420px;
-  }
-
-  .reject-icon {
-    font-size: 40px;
-    color: #e5a44b;
-  }
-
-  .reject-box h2 {
-    font-size: 22px;
-    font-weight: 700;
-    color: #f0e8d8;
-  }
-
-  .reject-box p {
-    font-size: 15px;
-    color: rgba(232, 224, 208, 0.6);
-    line-height: 1.5;
-  }
 
   .gold-btn {
     margin-top: 8px;
