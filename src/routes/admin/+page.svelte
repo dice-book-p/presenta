@@ -138,6 +138,17 @@
 
   // ── Slide upload ───────────────────────────────────────────────────────────
   let uploadFiles = $state([]);
+  let uploadClearTimer = null;
+
+  // 업로드 완료 후 5초 뒤 자동 정리 (에러 항목은 유지)
+  $effect(() => {
+    clearTimeout(uploadClearTimer);
+    if (uploadFiles.length > 0 && uploadFiles.every(f => f.status === 'done' || f.status === 'error')) {
+      uploadClearTimer = setTimeout(() => {
+        uploadFiles = uploadFiles.filter(f => f.status === 'error');
+      }, 5000);
+    }
+  });
   let isDragOver  = $state(false);
 
   // ── Signatory editor ───────────────────────────────────────────────────────
@@ -650,18 +661,61 @@
   function onDragEnd() { dragSrcId = null; dragOverId = null; }
 
   async function deleteSlide(slideId) {
-    if (!selectedProject || !confirm('이 슬라이드를 삭제하시겠습니까?')) return;
+    if (!selectedProject) return;
+
+    // 연결된 서명자 확인
+    const linkedSigs = (selectedProject.signatories || []).filter(s => s.slideId === slideId);
+    const isSummary = selectedProject.summarySlideId === slideId;
+    const warnings = [];
+    if (linkedSigs.length > 0) {
+      warnings.push(`서명자 ${linkedSigs.map(s => `${s.title} ${s.name}`).join(', ')}의 서명 슬라이드로 지정되어 있습니다.`);
+    }
+    if (isSummary) {
+      warnings.push('종합 서약서 슬라이드로 지정되어 있습니다.');
+    }
+
+    const msg = warnings.length > 0
+      ? `⚠️ 이 슬라이드에 연결된 데이터가 있습니다:\n\n${warnings.join('\n')}\n\n삭제하면 해당 연결이 모두 해제됩니다. 계속하시겠습니까?`
+      : '이 슬라이드를 삭제하시겠습니까?';
+    if (!confirm(msg)) return;
+
     const r = await apiDelete(`/api/projects/${selectedProject.id}/slides/${slideId}`);
     if (r.ok) {
-      selectedProject = { ...selectedProject, slides: selectedProject.slides.filter(s => s.id !== slideId) };
+      // 연결된 서명자의 slideId/canvasArea 해제
+      let sigs = selectedProject.signatories || [];
+      let sigsChanged = false;
+      sigs = sigs.map(s => {
+        if (s.slideId === slideId) { sigsChanged = true; return { ...s, slideId: null, canvasArea: null }; }
+        return s;
+      });
+      const updates = { slides: selectedProject.slides.filter(s => s.id !== slideId) };
+      if (isSummary) updates.summarySlideId = null;
+      if (sigsChanged) {
+        // 서명자 매핑도 서버에 반영
+        await apiPut(`/api/projects/${selectedProject.id}`, { signatories: sigs, ...updates });
+        selectedProject = { ...selectedProject, ...updates, signatories: sigs };
+      } else {
+        selectedProject = { ...selectedProject, ...updates };
+      }
       flash('삭제되었습니다.');
     } else flash('', '슬라이드 삭제 실패');
   }
 
   async function clearAllSlides() {
-    if (!selectedProject || !confirm('모든 슬라이드를 삭제하시겠습니까?')) return;
+    if (!selectedProject) return;
+    const linkedSigs = (selectedProject.signatories || []).filter(s => s.slideId);
+    const msg = linkedSigs.length > 0
+      ? `⚠️ ${linkedSigs.length}명의 서명자에 슬라이드가 연결되어 있습니다.\n모든 슬라이드를 삭제하면 서명 영역 설정이 모두 초기화됩니다.\n\n계속하시겠습니까?`
+      : '모든 슬라이드를 삭제하시겠습니까?';
+    if (!confirm(msg)) return;
     const r = await apiDelete(`/api/projects/${selectedProject.id}/slides`);
-    if (r.ok) { selectedProject = { ...selectedProject, slides: [], summarySlideId: null }; flash('초기화되었습니다.'); }
+    if (r.ok) {
+      // 모든 서명자의 슬라이드 매핑 해제
+      const sigs = (selectedProject.signatories || []).map(s => ({ ...s, slideId: null, canvasArea: null, summaryArea: null }));
+      if (sigs.length > 0) await apiPut(`/api/projects/${selectedProject.id}`, { signatories: sigs });
+      selectedProject = { ...selectedProject, slides: [], summarySlideId: null, signatories: sigs };
+      flash('초기화되었습니다.');
+    }
     else flash('', '초기화 실패');
   }
 
@@ -677,12 +731,14 @@
     isNewSig = true;
     editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, summaryArea: null };
     editSigError = '';
+    pickerMode = 'canvas';
   }
 
   function openEditSig(sig) {
     isNewSig = false;
     editSig  = JSON.parse(JSON.stringify({ color: '#ffffff', ...sig }));
     editSigError = '';
+    pickerMode = 'canvas';
   }
 
   async function saveSig() {
@@ -703,10 +759,21 @@
   }
 
   async function deleteSig(sigId) {
-    if (!selectedProject || !confirm('서명자를 삭제하시겠습니까?')) return;
+    if (!selectedProject) return;
+    const sig = (selectedProject.signatories || []).find(s => s.id === sigId);
+    const hasSig = signatures[sigId];
+    const warnings = [];
+    if (sig?.slideId) warnings.push('서명 슬라이드가 지정되어 있습니다.');
+    if (hasSig) warnings.push('서명 데이터가 존재합니다.');
+    const msg = warnings.length > 0
+      ? `⚠️ ${sig?.title} ${sig?.name} 서명자에 연결된 데이터가 있습니다:\n\n${warnings.join('\n')}\n\n삭제하면 모두 제거됩니다. 계속하시겠습니까?`
+      : `${sig?.title} ${sig?.name} 서명자를 삭제하시겠습니까?`;
+    if (!confirm(msg)) return;
+    // 서명 데이터도 제거
+    if (hasSig) await apiDelete(`/api/projects/${selectedProject.id}/signatures/${sigId}`).catch(() => {});
     const sigs = (selectedProject.signatories || []).filter(s => s.id !== sigId);
     const r = await apiPut(`/api/projects/${selectedProject.id}`, { signatories: sigs });
-    if (r.ok) { selectedProject = await r.json(); flash('삭제되었습니다.'); }
+    if (r.ok) { selectedProject = await r.json(); await loadSignatures(); flash('삭제되었습니다.'); }
     else flash('', '삭제 실패');
   }
 
@@ -914,8 +981,6 @@
             <button class="sidebar-add-btn" onclick={() => { showNewProject = !showNewProject; }} title="새 프로젝트">+</button>
           </div>
 
-          <!-- 프로젝트 생성 모달은 하단에 위치 -->
-
           {#if projects.length === 0}
             <div class="sidebar-empty">프로젝트 없음</div>
           {:else}
@@ -930,24 +995,6 @@
             </div>
           {/if}
         </div>
-
-        <!-- Project sub-nav -->
-        {#if selectedProject}
-          <div class="sidebar-divider"></div>
-          <div class="sidebar-group">
-            <div class="sidebar-group-label sidebar-group-label--project">
-              {selectedProject.name}
-            </div>
-            <nav class="sidebar-nav">
-              {#each NAV_ITEMS as item}
-                <button class="sidebar-nav-item" class:active={activeTab === item.id}
-                  onclick={() => changeTab(item.id)}>
-                  {item.label}
-                </button>
-              {/each}
-            </nav>
-          </div>
-        {/if}
 
         <!-- Guide link -->
         <div class="sidebar-spacer"></div>
@@ -1016,6 +1063,18 @@
       <!-- Flash messages -->
       {#if msg}<div class="flash flash-ok">{msg}</div>{/if}
       {#if err}<div class="flash flash-err">{err}</div>{/if}
+
+      <!-- Project tab bar (moved from sidebar) -->
+      {#if selectedProject}
+        <nav class="content-tabs">
+          {#each NAV_ITEMS as item}
+            <button class="content-tab" class:active={activeTab === item.id}
+              onclick={() => changeTab(item.id)}>
+              {item.label}
+            </button>
+          {/each}
+        </nav>
+      {/if}
 
       <!-- ── Content Area ── -->
       <div class="content">
@@ -1378,17 +1437,8 @@
                   </div>
                 {/if}
 
-                <!-- 서명 슬라이드 -->
+                <!-- 위치 설정 -->
                 <div class="form-section-label">위치 설정</div>
-                <div class="form-group">
-                  <label class="field-label">서명 슬라이드</label>
-                  <select class="select-input" bind:value={editSig.slideId}>
-                    <option value={null}>미지정</option>
-                    {#each sorted(selectedProject.slides) as s}
-                      <option value={s.id}>슬라이드 {s.order + 1}{s.id === selectedProject.summarySlideId ? ' (종합)' : ''}</option>
-                    {/each}
-                  </select>
-                </div>
 
                 <!-- Position Picker -->
                 <div class="form-group">
@@ -1399,6 +1449,19 @@
                       {#if !selectedProject.summarySlideId}<span class="tab-badge-warn">미설정</span>{/if}
                     </button>
                   </div>
+
+                  <!-- 개인 서명 탭: 슬라이드 선택 -->
+                  {#if pickerMode === 'canvas'}
+                    <div class="form-group picker-slide-select">
+                      <label class="field-label">서명 슬라이드</label>
+                      <select class="select-input" bind:value={editSig.slideId}>
+                        <option value={null}>미지정</option>
+                        {#each sorted(selectedProject.slides) as s}
+                          <option value={s.id}>슬라이드 {s.order + 1}{s.id === selectedProject.summarySlideId ? ' (종합)' : ''}</option>
+                        {/each}
+                      </select>
+                    </div>
+                  {/if}
 
                   {#if true}
                   {@const pickerSlideId = pickerMode === 'canvas' ? editSig.slideId : selectedProject.summarySlideId}
@@ -1832,6 +1895,32 @@
   .name-edit-input { background: rgba(255,255,255,.08); border: 1px solid rgba(201,168,76,.4);
     border-radius: 6px; padding: 4px 10px; color: #f0e8d8; font-size: 14px; font-family: inherit; outline: none; }
 
+  /* ── Content tab bar ── */
+  .content-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+    padding: 0 28px;
+    background: rgba(10,10,15,.4);
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .content-tab {
+    padding: 12px 18px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(232,224,208,.5);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .15s;
+  }
+  .content-tab:hover { color: rgba(232,224,208,.8); }
+  .content-tab.active { color: #c9a84c; border-bottom-color: #c9a84c; }
+
   .content { flex: 1; padding: 28px; overflow-y: auto; color: #e8e0d0; }
 
   /* ── Flash ── */
@@ -1991,6 +2080,7 @@
 
   /* ── Position picker ── */
   .picker-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .picker-slide-select { margin-bottom: 8px; }
   .picker-tab { display: flex; align-items: center; gap: 6px; padding: 6px 14px;
     background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
     border-radius: 6px; color: rgba(232,224,208,.5); font-size: 12px; font-family: inherit; cursor: pointer; }
