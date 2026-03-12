@@ -1,12 +1,14 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
-  // URL에서 토큰 + 프로젝트 ID 추출
-  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const token = params.get('t') ?? '';
-  const projectId = params.get('p') ?? '';
+  // URL 라우트에서 프로젝트 ID, 쿼리에서 토큰 추출
+  const projectId = $derived($page.params.id);
+  const token = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('t') ?? ''
+    : '';
 
   let project      = $state(null);
   let slideOrder   = $state(0);
@@ -85,7 +87,7 @@
 
   $effect(() => {
     if (wsStore.status === 'connected' && !identified && !rejected && token) {
-      wsStore.send({ type: 'identify_remote', token });
+      wsStore.send({ type: 'identify_remote', token, projectId });
     }
   });
 </script>

@@ -1,13 +1,12 @@
 <script>
   import { onMount } from 'svelte';
   import { tick } from 'svelte';
+  import { page } from '$app/stores';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
-  // URL에서 프로젝트 ID 추출
-  const projectId = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('p') ?? ''
-    : '';
+  // URL 라우트에서 프로젝트 ID 추출
+  const projectId = $derived($page.params.id);
 
   // ── State ─────────────────────────────────────────────────────────────────────
   let project      = $state(null);

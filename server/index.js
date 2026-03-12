@@ -46,6 +46,25 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // SvelteKit 핸들러에 캐시 제어 헤더 추가
+  // _app/immutable/ 에셋은 SvelteKit이 해시된 파일명으로 관리 → 장기 캐시 OK
+  // HTML 페이지는 항상 최신 버전 체크하도록 no-cache 설정
+  if (!url.pathname.startsWith('/_app/immutable/')) {
+    const origWriteHead = res.writeHead.bind(res);
+    res.writeHead = (statusCode, ...args) => {
+      // writeHead(status, headers) 또는 writeHead(status, statusMessage, headers)
+      const headers = typeof args[args.length - 1] === 'object' ? args[args.length - 1] : {};
+      const contentType = headers['Content-Type'] || headers['content-type'] || '';
+      // HTML 응답이거나, 명시적 Content-Type이 없는 페이지 요청에 no-cache 적용
+      if (!contentType || contentType.includes('text/html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+      return origWriteHead(statusCode, ...args);
+    };
+  }
+
   handler(req, res);
 });
 

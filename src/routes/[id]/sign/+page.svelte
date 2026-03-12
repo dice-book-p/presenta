@@ -1,13 +1,12 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { session } from '$lib/stores/session.svelte.js';
   import { API_BASE } from '$lib/config.js';
 
-  // URL에서 프로젝트 ID 추출
-  const projectId = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('p') ?? ''
-    : '';
+  // URL 라우트에서 프로젝트 ID 추출
+  const projectId = $derived($page.params.id);
 
   // ── State ─────────────────────────────────────────────────────────────────────
   let activeProject  = $state(null);   // loaded from /api/active
@@ -56,7 +55,7 @@
       // /api/active returns an array of active projects
       const list = Array.isArray(data) ? data : [];
       if (list.length === 0) { loadError = ''; activeProject = null; return; }
-      // Match by ?p=projectId, or fall back to first active project
+      // Match by route param projectId
       const matched = projectId ? list.find(p => p.id === projectId) : null;
       activeProject = matched ?? list[0];
       loadError = '';

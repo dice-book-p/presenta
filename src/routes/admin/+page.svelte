@@ -116,7 +116,7 @@
     const { token: remoteToken } = await r.json();
     const base = window.location.origin;
     const QRCode = await import('qrcode');
-    remoteQr = await QRCode.default.toDataURL(`${base}/remote?p=${selectedProject.id}&t=${remoteToken}`, {
+    remoteQr = await QRCode.default.toDataURL(`${base}/${selectedProject.id}/remote?t=${remoteToken}`, {
       width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
     });
   }
@@ -128,7 +128,7 @@
     if (!selectedProject) return;
     const base = window.location.origin;
     const QRCode = await import('qrcode');
-    signQr = await QRCode.default.toDataURL(`${base}/sign?p=${selectedProject.id}`, {
+    signQr = await QRCode.default.toDataURL(`${base}/${selectedProject.id}/sign`, {
       width: 200, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
     });
   }
@@ -1547,7 +1547,7 @@
                   <div class="qr-card">
                     <div class="qr-card-label">서명자 화면</div>
                     <img class="qr-img" src={signQr} alt="서명 QR" />
-                    <code class="qr-url">/sign?p={selectedProject?.id?.slice(0, 8)}···</code>
+                    <code class="qr-url">/{selectedProject?.id?.slice(0, 8)}···/sign</code>
                   </div>
                 {:else}
                   <div class="qr-card">
@@ -1560,7 +1560,7 @@
                   <div class="qr-card">
                     <div class="qr-card-label">슬라이드 리모컨</div>
                     <img class="qr-img" src={remoteQr} alt="리모컨 QR" />
-                    <code class="qr-url">/remote?t=···</code>
+                    <code class="qr-url">/{selectedProject?.id?.slice(0, 8)}···/remote</code>
                   </div>
                 {:else}
                   <div class="qr-card">
