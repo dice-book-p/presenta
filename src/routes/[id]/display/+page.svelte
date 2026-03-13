@@ -460,6 +460,9 @@
     sessionStorage.setItem(SS_SLIDE, String(idx));
     wsStore.send({ type: 'slide_change', slideIndex: sortedSlides[idx].order });
 
+    // 슬라이드 이동 시 영상 오버레이 제거
+    if (playingVideo) playingVideo = null;
+
     // Effects on slide change
     handleBgmForSlide(idx, oldIdx);
     handleAmbientForSlide(idx);
@@ -793,7 +796,7 @@
       <!-- svelte-ignore a11y_media_has_caption -->
       <div class="video-overlay">
         <video src={playingVideo} autoplay
-          onended={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
+          onended={() => { if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
           onerror={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
           style="width:100%;height:100%;object-fit:fill"></video>
       </div>
