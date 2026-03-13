@@ -119,6 +119,7 @@ async function loadProjectsFromDB() {
       canvasArea: s.canvas_area,
       displaySlides,
       videoId: s.video_id ?? null,
+      bgmId: s.bgm_id ?? null,
     });
   }
 
@@ -236,6 +237,7 @@ async function saveProjectsToDB(store) {
           canvas_area: s.canvasArea ?? null,
           display_slides: s.displaySlides ?? [],
           video_id: s.videoId ?? null,
+          bgm_id: s.bgmId ?? null,
         }))
       );
     }
