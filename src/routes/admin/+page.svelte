@@ -317,10 +317,10 @@
   });
 
   // ── Position Picker ────────────────────────────────────────────────────────
-  let pickerEl   = $state(null);
-  let pickerMode = $state('canvas');  // 'canvas' | 'summary'
-  let isDragging = false;
-  let startPct   = null;
+  let pickerEl     = $state(null);
+  let pickerTarget = $state('canvas'); // 'canvas' | number (displaySlides 인덱스)
+  let isDragging   = false;
+  let startPct     = null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   // ── History 관리 ───────────────────────────────────────────────────────────
@@ -733,13 +733,13 @@
 
     // 연결된 서명자 확인
     const linkedSigs = (selectedProject.signatories || []).filter(s => s.slideId === slideId);
-    const isSummary = selectedProject.summarySlideId === slideId;
+    const displayLinked = (selectedProject.signatories || []).filter(s => s.displaySlides?.some(d => d.slideId === slideId));
     const warnings = [];
     if (linkedSigs.length > 0) {
       warnings.push(`서명자 ${linkedSigs.map(s => `${s.title} ${s.name}`).join(', ')}의 서명 슬라이드로 지정되어 있습니다.`);
     }
-    if (isSummary) {
-      warnings.push('종합 서약서 슬라이드로 지정되어 있습니다.');
+    if (displayLinked.length > 0) {
+      warnings.push(`서명자 ${displayLinked.map(s => `${s.title} ${s.name}`).join(', ')}의 서명 표시 슬라이드로 지정되어 있습니다.`);
     }
 
     const msg = warnings.length > 0
@@ -749,17 +749,18 @@
 
     const r = await apiDelete(`/api/projects/${selectedProject.id}/slides/${slideId}`);
     if (r.ok) {
-      // 연결된 서명자의 slideId/canvasArea 해제
       let sigs = selectedProject.signatories || [];
-      let sigsChanged = false;
+      let sigsChanged = linkedSigs.length > 0 || displayLinked.length > 0;
       sigs = sigs.map(s => {
-        if (s.slideId === slideId) { sigsChanged = true; return { ...s, slideId: null, canvasArea: null }; }
-        return s;
+        let updated = s;
+        if (s.slideId === slideId) updated = { ...updated, slideId: null, canvasArea: null };
+        if (s.displaySlides?.some(d => d.slideId === slideId)) {
+          updated = { ...updated, displaySlides: s.displaySlides.filter(d => d.slideId !== slideId) };
+        }
+        return updated;
       });
       const updates = { slides: selectedProject.slides.filter(s => s.id !== slideId) };
-      if (isSummary) updates.summarySlideId = null;
       if (sigsChanged) {
-        // 서명자 매핑도 서버에 반영
         await apiPut(`/api/projects/${selectedProject.id}`, { signatories: sigs, ...updates });
         selectedProject = { ...selectedProject, ...updates, signatories: sigs };
       } else {
@@ -779,34 +780,29 @@
     const r = await apiDelete(`/api/projects/${selectedProject.id}/slides`);
     if (r.ok) {
       // 모든 서명자의 슬라이드 매핑 해제
-      const sigs = (selectedProject.signatories || []).map(s => ({ ...s, slideId: null, canvasArea: null, summaryArea: null }));
+      const sigs = (selectedProject.signatories || []).map(s => ({ ...s, slideId: null, canvasArea: null, displaySlides: [] }));
       if (sigs.length > 0) await apiPut(`/api/projects/${selectedProject.id}`, { signatories: sigs });
-      selectedProject = { ...selectedProject, slides: [], summarySlideId: null, signatories: sigs };
+      selectedProject = { ...selectedProject, slides: [], signatories: sigs };
       flash('초기화되었습니다.');
     }
     else flash('', '초기화 실패');
   }
 
-  async function setSummarySlide(slideId) {
-    if (!selectedProject) return;
-    const r = await apiPut(`/api/projects/${selectedProject.id}`, { summarySlideId: slideId || null });
-    if (r.ok) selectedProject = await r.json();
-    else flash('', '변경 실패');
-  }
-
   // ── Signatory operations ───────────────────────────────────────────────────
   function openNewSig() {
     isNewSig = true;
-    editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, summaryArea: null, videoId: null };
+    editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, displaySlides: [], videoId: null };
     editSigError = '';
-    pickerMode = 'canvas';
+    pickerTarget = 'canvas';
   }
 
   function openEditSig(sig) {
     isNewSig = false;
-    editSig  = JSON.parse(JSON.stringify({ color: '#ffffff', ...sig }));
+    const copy = JSON.parse(JSON.stringify({ color: '#ffffff', displaySlides: [], ...sig }));
+    delete copy.summaryArea; // 구버전 필드 제거
+    editSig  = copy;
     editSigError = '';
-    pickerMode = 'canvas';
+    pickerTarget = 'canvas';
   }
 
   async function saveSig() {
@@ -880,8 +876,13 @@
       width:  `${Math.abs(cx - startPct.x).toFixed(1)}%`,
       height: `${Math.abs(cy - startPct.y).toFixed(1)}%`,
     };
-    if (pickerMode === 'canvas') editSig = { ...editSig, canvasArea: area };
-    else editSig = { ...editSig, summaryArea: area };
+    if (pickerTarget === 'canvas') {
+      editSig = { ...editSig, canvasArea: area };
+    } else {
+      const ds = [...(editSig.displaySlides ?? [])];
+      ds[pickerTarget] = { ...ds[pickerTarget], area };
+      editSig = { ...editSig, displaySlides: ds };
+    }
   }
 
   function pickerUp() { isDragging = false; }
@@ -1514,8 +1515,8 @@
             <!-- 업로드 -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="media-upload-zone" ondragover={e => e.preventDefault()} ondrop={handleMediaDrop}>
-              <p class="helper-text">음원(MP3, WAV, OGG) 또는 영상(MP4, WebM)을 드래그하거나 클릭하여 업로드</p>
-              <input type="file" accept="audio/*,video/*" style="display:none" id="media-file-input"
+              <p class="helper-text">음원(MP3, WAV, OGG) 또는 영상(WebM 권장, MP4) — 영상은 WebM이 더 작은 파일 크기를 제공합니다</p>
+              <input type="file" accept=".mp3,.wav,.ogg,.webm,.mp4,audio/*,video/webm,video/mp4" style="display:none" id="media-file-input"
                 onchange={e => { if (e.target.files[0]) uploadMediaFile(e.target.files[0]); e.target.value = ''; }} />
               <button class="btn-gold btn-sm" disabled={mediaUploading}
                 onclick={() => document.getElementById('media-file-input').click()}>
@@ -1688,24 +1689,12 @@
               이미지 또는 PDF 파일을 여기에 드래그하거나 위 버튼으로 업로드하세요
             </div>
 
-            <div class="field-row">
-              <label class="field-label">종합 서약서 슬라이드</label>
-              <select class="select-input select-input-inline" value={selectedProject.summarySlideId ?? ''}
-                onchange={e => setSummarySlide(e.target.value)}>
-                <option value="">없음</option>
-                {#each sorted(selectedProject.slides) as s}
-                  <option value={s.id}>슬라이드 {s.order + 1}</option>
-                {/each}
-              </select>
-            </div>
-
             {#if sorted(selectedProject.slides).length === 0}
               <div class="empty-state">슬라이드가 없습니다.</div>
             {:else}
               <div class="slide-list">
                 {#each sorted(selectedProject.slides) as slide, i (slide.id)}
                   <div class="slide-row"
-                    class:summary={slide.id === selectedProject.summarySlideId}
                     class:dragging={dragSrcId === slide.id}
                     class:drag-over={dragOverId === slide.id}
                     draggable="true"
@@ -1720,9 +1709,6 @@
                     <img class="slide-thumb" src={slide.url} alt="슬라이드 {slide.order + 1}" loading="lazy" />
                     <div class="slide-info">
                       <span class="slide-filename">{slide.originalFilename || slide.filename}</span>
-                      {#if slide.id === selectedProject.summarySlideId}
-                        <span class="tag-summary">종합 서약서</span>
-                      {/if}
                     </div>
                     <div class="row-actions">
                       <button class="btn-icon danger" onclick={() => deleteSlide(slide.id)}>✕</button>
@@ -1825,36 +1811,73 @@
                   </div>
                 {/if}
 
-                <!-- 위치 설정 -->
+                <!-- 위치 설정 (영상 모드에서는 불필요) -->
+                {#if currentSignEffect.mode !== 'video'}
                 <div class="form-section-label">위치 설정</div>
 
-                <!-- Position Picker -->
+                <!-- 서명 슬라이드 (실시간 서명 영역) -->
                 <div class="form-group">
                   <div class="picker-tabs">
-                    <button class="picker-tab" class:active={pickerMode==='canvas'} onclick={() => pickerMode = 'canvas'}>개인 서명 영역</button>
-                    <button class="picker-tab" class:active={pickerMode==='summary'} onclick={() => pickerMode = 'summary'}>
-                      종합 서명 영역
-                      {#if !selectedProject.summarySlideId}<span class="tab-badge-warn">미설정</span>{/if}
+                    <button class="picker-tab" class:active={pickerTarget==='canvas'} onclick={() => pickerTarget = 'canvas'}>
+                      서명 슬라이드
                     </button>
+                    {#each (editSig.displaySlides ?? []) as ds, i}
+                      <button class="picker-tab" class:active={pickerTarget===i} onclick={() => pickerTarget = i}>
+                        표시 슬라이드 {i + 1}
+                      </button>
+                    {/each}
                   </div>
 
-                  <!-- 개인 서명 탭: 슬라이드 선택 -->
-                  {#if pickerMode === 'canvas'}
+                  <!-- 서명 슬라이드 탭 -->
+                  {#if pickerTarget === 'canvas'}
                     <div class="form-group picker-slide-select">
-                      <label class="field-label">서명 슬라이드</label>
+                      <label class="field-label">실시간 서명이 이루어지는 슬라이드</label>
                       <select class="select-input" bind:value={editSig.slideId}>
                         <option value={null}>미지정</option>
                         {#each sorted(selectedProject.slides) as s}
-                          <option value={s.id}>슬라이드 {s.order + 1}{s.id === selectedProject.summarySlideId ? ' (종합)' : ''}</option>
+                          <option value={s.id}>슬라이드 {s.order + 1}</option>
                         {/each}
                       </select>
                     </div>
+                  {:else}
+                    <!-- 표시 슬라이드 탭 -->
+                    {@const dsIdx = pickerTarget}
+                    <div class="form-group picker-slide-select">
+                      <label class="field-label">서명이 표시될 슬라이드 {dsIdx + 1}</label>
+                      <div style="display:flex;gap:8px;align-items:center">
+                        <select class="select-input" value={editSig.displaySlides[dsIdx].slideId ?? ''}
+                          onchange={e => {
+                            const ds = [...editSig.displaySlides];
+                            ds[dsIdx] = { ...ds[dsIdx], slideId: e.target.value || null };
+                            editSig = { ...editSig, displaySlides: ds };
+                          }}>
+                          <option value="">미지정</option>
+                          {#each sorted(selectedProject.slides) as s}
+                            <option value={s.id}>슬라이드 {s.order + 1}</option>
+                          {/each}
+                        </select>
+                        <button class="btn-ghost btn-sm" style="flex-shrink:0;color:#e07070;border-color:rgba(200,60,60,.3)" onclick={() => {
+                          const ds = [...editSig.displaySlides];
+                          ds.splice(dsIdx, 1);
+                          editSig = { ...editSig, displaySlides: ds };
+                          pickerTarget = 'canvas';
+                        }}>삭제</button>
+                      </div>
+                    </div>
                   {/if}
 
+                  <!-- 서명 표시 슬라이드 추가 버튼 -->
+                  <button class="btn-ghost btn-sm" style="margin-bottom:12px" onclick={() => {
+                    const ds = [...(editSig.displaySlides ?? []), { slideId: null, area: null }];
+                    editSig = { ...editSig, displaySlides: ds };
+                    pickerTarget = ds.length - 1;
+                  }}>+ 서명 표시 슬라이드 추가</button>
+
+                  <!-- 위치 드래그 picker -->
                   {#if true}
-                  {@const pickerSlideId = pickerMode === 'canvas' ? editSig.slideId : selectedProject.summarySlideId}
+                  {@const pickerSlideId = pickerTarget === 'canvas' ? editSig.slideId : (editSig.displaySlides?.[pickerTarget]?.slideId ?? null)}
                   {@const pickerSlide = selectedProject.slides.find(s => s.id === pickerSlideId)}
-                  {@const currentArea = pickerMode === 'canvas' ? editSig.canvasArea : editSig.summaryArea}
+                  {@const currentArea = pickerTarget === 'canvas' ? editSig.canvasArea : (editSig.displaySlides?.[pickerTarget]?.area ?? null)}
                   {#if pickerSlide}
                     <p class="picker-hint">이미지 위에서 드래그하여 서명 영역을 지정하세요.</p>
                     <div class="picker-wrap"
@@ -1875,28 +1898,33 @@
                             <span>{key}</span>
                             <input type="text" class="text-input area-input" value={currentArea[key]}
                               oninput={e => {
-                                const a = { ...(pickerMode==='canvas' ? editSig.canvasArea : editSig.summaryArea), [key]: e.target.value };
-                                if (pickerMode==='canvas') editSig = { ...editSig, canvasArea: a };
-                                else editSig = { ...editSig, summaryArea: a };
+                                if (pickerTarget === 'canvas') {
+                                  editSig = { ...editSig, canvasArea: { ...editSig.canvasArea, [key]: e.target.value } };
+                                } else {
+                                  const ds = [...editSig.displaySlides];
+                                  ds[pickerTarget] = { ...ds[pickerTarget], area: { ...ds[pickerTarget].area, [key]: e.target.value } };
+                                  editSig = { ...editSig, displaySlides: ds };
+                                }
                               }} />
                           </label>
                         {/each}
                         <button class="btn-ghost btn-sm" onclick={() => {
-                          if (pickerMode==='canvas') editSig = { ...editSig, canvasArea: null };
-                          else editSig = { ...editSig, summaryArea: null };
+                          if (pickerTarget === 'canvas') {
+                            editSig = { ...editSig, canvasArea: null };
+                          } else {
+                            const ds = [...editSig.displaySlides];
+                            ds[pickerTarget] = { ...ds[pickerTarget], area: null };
+                            editSig = { ...editSig, displaySlides: ds };
+                          }
                         }}>초기화</button>
                       </div>
                     {/if}
-                  {:else if pickerMode === 'summary'}
-                    <div class="empty-state-warn">
-                      ⚠️ 종합 서약서 슬라이드가 지정되지 않았습니다.<br>
-                      <span>슬라이드 탭 → <strong>종합 서약서 슬라이드</strong> 드롭다운에서 해당 슬라이드를 먼저 선택해주세요.</span>
-                    </div>
                   {:else}
                     <div class="empty-state">서명 슬라이드를 먼저 선택해주세요.</div>
                   {/if}
                   {/if}
                 </div>
+                {/if}
               </div>
 
               <div class="form-footer">

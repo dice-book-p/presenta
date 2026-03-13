@@ -38,6 +38,7 @@
   const isMyTurn    = $derived(
     session.data !== null && activeSignId === session.data.signId
   );
+  const isVideoMode = $derived(activeProject?.signEffect?.mode === 'video');
 
   function getCtx() {
     if (!canvasEl) return null;
@@ -176,8 +177,8 @@
   async function completeSignature() {
     // 1. WS로 완료 알림 (재시도 포함)
     retrySend({ type: 'sign_done', signId: session.data.signId });
-    // 2. 서명 이미지를 직접 서버에 저장 (display 유실 대비 백업)
-    if (canvasEl && activeProject) {
+    // 2. 실시간 모드에서만 서명 이미지 저장 (영상 모드는 캔버스 미사용)
+    if (!isVideoMode && canvasEl && activeProject) {
       const dataUrl = canvasEl.toDataURL('image/png');
       try {
         await fetch(`${API_BASE}/api/projects/${activeProject.id}/signatures`, {
@@ -414,55 +415,74 @@
       <div class="status-banner" class:active={isMyTurn}>
         {#if isMyTurn}
           <span class="status-dot blink"></span>
-          <span>서명 진행 중</span>
+          <span>{isVideoMode ? '서명 준비 완료' : '서명 진행 중'}</span>
         {:else}
           <span class="status-dot waiting"></span>
           <span>대기 중</span>
         {/if}
       </div>
 
-      <!-- 캔버스 영역 -->
-      <div class="canvas-wrap">
-        <canvas
-          bind:this={canvasEl}
-          class="sig-canvas"
-          class:inactive={!isMyTurn}
-          width="800"
-          height="400"
-          onpointerdown={onPointerDown}
-          onpointermove={onPointerMove}
-          onpointerup={onPointerUp}
-          onpointercancel={onPointerUp}
-        ></canvas>
-
-        {#if !isMyTurn}
-          <div class="waiting-overlay">
-            <div class="waiting-content">
-              <div class="waiting-icon">⏳</div>
-              <p>차례를 기다리고 있습니다</p>
-              <p class="waiting-sub">슬라이드가 진행되면 자동으로 활성화됩니다</p>
-            </div>
+      {#if isVideoMode}
+        <!-- 영상 모드: 완료 버튼만 표시 -->
+        <div class="video-mode-wrap">
+          <div class="video-mode-info">
+            <div class="video-mode-icon">🎬</div>
+            <p>영상 서명 모드</p>
+            <p class="waiting-sub">준비가 되면 아래 버튼을 눌러 서명을 완료하세요.</p>
           </div>
-        {/if}
-      </div>
+          <div class="action-row">
+            <button class="action-btn done-btn" disabled={!isMyTurn} onclick={completeSignature}>
+              서명 완료
+            </button>
+          </div>
+          {#if !isMyTurn}
+            <p class="hint-text">PC 화면의 슬라이드가 진행되면 활성화됩니다.</p>
+          {/if}
+        </div>
+      {:else}
+        <!-- 실시간 모드: 캔버스 -->
+        <div class="canvas-wrap">
+          <canvas
+            bind:this={canvasEl}
+            class="sig-canvas"
+            class:inactive={!isMyTurn}
+            width="800"
+            height="400"
+            onpointerdown={onPointerDown}
+            onpointermove={onPointerMove}
+            onpointerup={onPointerUp}
+            onpointercancel={onPointerUp}
+          ></canvas>
 
-      <!-- 버튼 -->
-      <div class="action-row">
-        <button class="action-btn clear-btn" disabled={!isMyTurn} onclick={clearSignature}>
-          다시 서명
-        </button>
-        <button class="action-btn done-btn" disabled={!isMyTurn} onclick={completeSignature}>
-          서명 완료
-        </button>
-      </div>
+          {#if !isMyTurn}
+            <div class="waiting-overlay">
+              <div class="waiting-content">
+                <div class="waiting-icon">⏳</div>
+                <p>차례를 기다리고 있습니다</p>
+                <p class="waiting-sub">슬라이드가 진행되면 자동으로 활성화됩니다</p>
+              </div>
+            </div>
+          {/if}
+        </div>
 
-      <p class="hint-text">
-        {#if isMyTurn}
-          위 영역에 서명 후 "서명 완료" 버튼을 눌러주세요.
-        {:else}
-          PC 화면의 슬라이드가 해당 서약서 페이지로 이동하면 서명이 활성화됩니다.
-        {/if}
-      </p>
+        <!-- 버튼 -->
+        <div class="action-row">
+          <button class="action-btn clear-btn" disabled={!isMyTurn} onclick={clearSignature}>
+            다시 서명
+          </button>
+          <button class="action-btn done-btn" disabled={!isMyTurn} onclick={completeSignature}>
+            서명 완료
+          </button>
+        </div>
+
+        <p class="hint-text">
+          {#if isMyTurn}
+            위 영역에 서명 후 "서명 완료" 버튼을 눌러주세요.
+          {:else}
+            PC 화면의 슬라이드가 해당 서약서 페이지로 이동하면 서명이 활성화됩니다.
+          {/if}
+        </p>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -766,6 +786,28 @@
   }
 
   .hint-text { padding: 0 20px 20px; font-size: 13px; color: rgba(232, 224, 208, 0.35); text-align: center; line-height: 1.5; }
+
+  /* ── Video mode ── */
+  .video-mode-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 40px 20px;
+  }
+
+  .video-mode-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+  }
+
+  .video-mode-icon { font-size: 48px; opacity: 0.7; }
+  .video-mode-info p { font-size: 18px; font-weight: 600; color: rgba(232, 224, 208, 0.8); margin: 0; }
 
   /* ── Done screen ── */
   .done-screen {

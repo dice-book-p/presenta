@@ -51,9 +51,6 @@
     [...(project?.slides ?? [])].sort((a, b) => a.order - b.order)
   );
   const currentSlideObj = $derived(sortedSlides[currentSlide] ?? null);
-  const isSummarySlide  = $derived(
-    !!project?.summarySlideId && currentSlideObj?.id === project.summarySlideId
-  );
 
   // ── ±2 preload ──────────────────────────────────────────────────────────────
   let preloadedUrls = new Set();
@@ -88,12 +85,16 @@
   }
 
   function getCanvasArea(sig) {
-    return isSummarySlide ? (sig.summaryArea ?? sig.canvasArea) : sig.canvasArea;
+    if (currentSlideObj?.id === sig.slideId) return sig.canvasArea;
+    const ds = sig.displaySlides?.find(d => d.slideId === currentSlideObj?.id);
+    return ds?.area ?? null;
   }
 
   function isCanvasVisible(sig) {
     if (!project) return false;
-    return isSummarySlide || currentSlideObj?.id === sig.slideId;
+    if (effectConfig?.mode === 'video') return false; // 영상 모드: 서명 영역 오버레이 불필요
+    if (currentSlideObj?.id === sig.slideId) return true;
+    return sig.displaySlides?.some(d => d.slideId === currentSlideObj?.id) ?? false;
   }
 
   function areaStyle(area) {
@@ -135,17 +136,26 @@
     const px = msg.x * canvas.width;
     const py = msg.y * canvas.height;
 
-    // Pen particle: emit at screen coordinates
-    if (effectConfig && particleEngine && msg.action === 'move') {
-      const area = getCanvasArea(sig);
-      if (area) {
-        const wrapW = window.innerWidth;
-        const wrapH = window.innerHeight;
-        const aLeft = parseFloat(area.left) / 100 * wrapW;
-        const aTop = parseFloat(area.top) / 100 * wrapH;
-        const aW = parseFloat(area.width) / 100 * wrapW;
-        const aH = parseFloat(area.height) / 100 * wrapH;
-        particleEngine.emit(aLeft + msg.x * aW, aTop + msg.y * aH, effectConfig);
+    const isVideoMode = effectConfig?.mode === 'video';
+
+    // 실시간 모드 이펙트만 (영상 모드 제외)
+    if (effectConfig && !isVideoMode && particleEngine) {
+      // 서명 시작 시: ambient particle 시작
+      if (msg.action === 'start' && effectConfig.ambientParticle) {
+        particleEngine.startAmbient(effectConfig);
+      }
+      // 펜 파티클: draw 이동 중
+      if (msg.action === 'move') {
+        const area = getCanvasArea(sig);
+        if (area) {
+          const wrapW = window.innerWidth;
+          const wrapH = window.innerHeight;
+          const aLeft = parseFloat(area.left) / 100 * wrapW;
+          const aTop = parseFloat(area.top) / 100 * wrapH;
+          const aW = parseFloat(area.width) / 100 * wrapW;
+          const aH = parseFloat(area.height) / 100 * wrapH;
+          particleEngine.emit(aLeft + msg.x * aW, aTop + msg.y * aH, effectConfig);
+        }
       }
     }
 
@@ -198,6 +208,10 @@
       ctx.beginPath();
       ctx.moveTo(fx, fy);
       drawingState[msg.signId] = { lastX: fx, lastY: fy };
+      // ambient 시작 (draw start 유실로 미시작된 경우 대비)
+      if (effectConfig && effectConfig.mode !== 'video' && particleEngine && effectConfig.ambientParticle) {
+        particleEngine.startAmbient(effectConfig);
+      }
     }
 
     for (const pt of points) {
@@ -206,8 +220,8 @@
       drawSmoothPoint(ctx, drawingState[msg.signId], px, py);
     }
 
-    // Pen particle for batch (emit on last point)
-    if (effectConfig && particleEngine && points.length) {
+    // 펜 파티클 (실시간 모드, 배치 마지막 점 기준)
+    if (effectConfig && effectConfig.mode !== 'video' && particleEngine && points.length) {
       const lastPt = points[points.length - 1];
       const area = getCanvasArea(sig);
       if (area) {
@@ -313,8 +327,10 @@
     if (!project?.signatories?.length || !sortedSlides.length) return false;
     const slide = sortedSlides[slideIdx];
     if (!slide) return false;
-    return project.signatories.some(s => s.slideId === slide.id) ||
-           (project.summarySlideId && slide.id === project.summarySlideId);
+    return project.signatories.some(s =>
+      s.slideId === slide.id ||
+      s.displaySlides?.some(d => d.slideId === slide.id)
+    );
   }
 
   function getSignSlideRange() {
@@ -392,12 +408,12 @@
   }
 
   function handleAmbientForSlide(newIdx) {
-    if (!effectConfig || !particleEngine) return;
-    if (isSignSlide(newIdx)) {
-      particleEngine.startAmbient(effectConfig);
-    } else {
+    if (!effectConfig || !particleEngine || effectConfig.mode === 'video') return;
+    // ambient는 서명 시작(첫 draw) 시 켜짐, 비서명 슬라이드 이동 시 끔
+    if (!isSignSlide(newIdx)) {
       particleEngine.stopAmbient();
     }
+    // 서명 슬라이드 진입 시 자동 시작 안 함 — 첫 draw 시 시작
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -623,6 +639,9 @@
         bgmPlaying = false;
       }
 
+      // Ambient 정지 (서명 완료 시)
+      if (particleEngine) particleEngine.stopAmbient();
+
       // Mode branching
       if (!effectConfig) {
         // No effect — legacy behavior
@@ -778,7 +797,7 @@
         <video src={playingVideo} autoplay
           onended={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
           onerror={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
-          style="width:100%;height:100%;object-fit:contain"></video>
+          style="width:100%;height:100%;object-fit:cover"></video>
       </div>
     {/if}
 

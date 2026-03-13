@@ -71,3 +71,7 @@ CREATE TABLE IF NOT EXISTS media (
 -- ── 마이그레이션: 서명 연출 효과 ──────────────────────────────────────────────
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS sign_effect JSONB DEFAULT NULL;
 ALTER TABLE signatories ADD COLUMN IF NOT EXISTS video_id UUID DEFAULT NULL;
+
+-- ── 마이그레이션: 서명 표시 슬라이드 (displaySlides) ──────────────────────────
+-- 기존 summary_slide_id (projects), summary_area (signatories) 대체
+ALTER TABLE signatories ADD COLUMN IF NOT EXISTS display_slides JSONB DEFAULT '[]'::jsonb;

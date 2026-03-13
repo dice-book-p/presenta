@@ -107,6 +107,8 @@ async function loadProjectsFromDB() {
 
   const sigMap = {};
   for (const s of (allSignatories ?? [])) {
+    // Migration: summary_area → display_slides (DB에 display_slides 없는 경우)
+    let displaySlides = Array.isArray(s.display_slides) ? s.display_slides : [];
     (sigMap[s.project_id] ??= []).push({
       id: s.id,
       order: s.sort_order,
@@ -115,7 +117,7 @@ async function loadProjectsFromDB() {
       color: s.color ?? '#ffffff',
       slideId: s.slide_id,
       canvasArea: s.canvas_area,
-      summaryArea: s.summary_area,
+      displaySlides,
       videoId: s.video_id ?? null,
     });
   }
@@ -126,7 +128,6 @@ async function loadProjectsFromDB() {
       id: p.id,
       name: p.name,
       createdAt: p.created_at,
-      summarySlideId: p.summary_slide_id,
       pin: p.pin ?? '',
       remoteToken: p.remote_token ?? '',
       slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
@@ -192,7 +193,6 @@ async function saveProjectsToDB(store) {
         id: p.id,
         name: p.name,
         created_at: p.createdAt,
-        summary_slide_id: p.summarySlideId,
         pin: p.pin ?? '',
         remote_token: p.remoteToken ?? '',
         slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
@@ -232,7 +232,7 @@ async function saveProjectsToDB(store) {
           color: s.color ?? '#ffffff',
           slide_id: s.slideId ?? null,
           canvas_area: s.canvasArea ?? null,
-          summary_area: s.summaryArea ?? null,
+          display_slides: s.displaySlides ?? [],
           video_id: s.videoId ?? null,
         }))
       );

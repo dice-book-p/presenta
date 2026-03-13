@@ -39,6 +39,18 @@ export async function initProjectsStore() {
       if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false }; migrated = true; }
       if (p.slideshow && p.slideshow.showSlideNumber === undefined) { p.slideshow.showSlideNumber = false; migrated = true; }
       if (!p.signEffect) { p.signEffect = defaultSignEffect(); migrated = true; }
+      // Migration: summarySlideId + summaryArea → displaySlides per-signatory
+      for (const sig of (p.signatories ?? [])) {
+        if (!sig.displaySlides) {
+          sig.displaySlides = [];
+          if (p.summarySlideId && sig.summaryArea) {
+            sig.displaySlides = [{ slideId: p.summarySlideId, area: sig.summaryArea }];
+          }
+          delete sig.summaryArea;
+          migrated = true;
+        }
+      }
+      if ('summarySlideId' in p) { delete p.summarySlideId; migrated = true; }
       for (const s of (p.slides ?? [])) {
         if (s.url && /^https?:\/\/[^/]+\/uploads\//.test(s.url)) {
           s.url = s.url.replace(/^https?:\/\/[^/]+/, '');
@@ -147,7 +159,6 @@ export function createProject(name) {
     id: randomUUID(),
     name,
     createdAt: new Date().toISOString(),
-    summarySlideId: null,
     slides: [],
     signatories: [],
     pin: '',
@@ -163,7 +174,7 @@ export function createProject(name) {
 export function updateProject(id, updates) {
   const project = getProject(id);
   if (!project) return null;
-  for (const key of ['name', 'summarySlideId', 'signatories', 'slides', 'pin', 'slideshow', 'signEffect']) {
+  for (const key of ['name', 'signatories', 'slides', 'pin', 'slideshow', 'signEffect']) {
     if (key in updates) project[key] = updates[key];
   }
   persist();
@@ -236,7 +247,12 @@ export function removeSlide(projectId, slideId) {
     .filter(s => s.id !== slideId)
     .map((s, i) => ({ ...s, order: i }));
   if (project.slides.length === before) return false;
-  if (project.summarySlideId === slideId) project.summarySlideId = null;
+  // displaySlides에서 해당 slideId 제거
+  for (const sig of (project.signatories ?? [])) {
+    if (sig.displaySlides?.some(d => d.slideId === slideId)) {
+      sig.displaySlides = sig.displaySlides.filter(d => d.slideId !== slideId);
+    }
+  }
   persist();
   return true;
 }
@@ -247,15 +263,15 @@ export function updateSignatories(projectId, signatories) {
   const project = getProject(projectId);
   if (!project) return null;
   project.signatories = signatories.map((s, i) => ({
-    id:          s.id || randomUUID(),
-    order:       i + 1,
-    title:       s.title       || '',
-    name:        s.name        || '',
-    color:       s.color       || '#ffffff',
-    slideId:     s.slideId     || null,
-    canvasArea:  s.canvasArea  || null,
-    summaryArea: s.summaryArea || null,
-    videoId:     s.videoId     || null,
+    id:           s.id || randomUUID(),
+    order:        i + 1,
+    title:        s.title        || '',
+    name:         s.name         || '',
+    color:        s.color        || '#ffffff',
+    slideId:      s.slideId      || null,
+    canvasArea:   s.canvasArea   || null,
+    displaySlides: Array.isArray(s.displaySlides) ? s.displaySlides : [],
+    videoId:      s.videoId      || null,
   }));
   persist();
   return project.signatories;
