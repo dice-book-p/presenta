@@ -36,8 +36,13 @@ export async function initProjectsStore() {
     // Migration: 절대 URL → 상대경로 변환 (localhost:PORT/uploads/... → /uploads/...)
     let migrated = false;
     for (const p of store.projects) {
-      if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false }; migrated = true; }
+      if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false, transition: 'none' }; migrated = true; }
       if (p.slideshow && p.slideshow.showSlideNumber === undefined) { p.slideshow.showSlideNumber = false; migrated = true; }
+      // Migration: signEffect.transition → slideshow.transition
+      if (p.slideshow && p.slideshow.transition === undefined) {
+        p.slideshow.transition = p.signEffect?.transition ?? 'none';
+        migrated = true;
+      }
       if (!p.signEffect) { p.signEffect = defaultSignEffect(); migrated = true; }
       // Migration: summarySlideId + summaryArea → displaySlides per-signatory
       for (const sig of (p.signatories ?? [])) {
@@ -163,7 +168,7 @@ export function createProject(name) {
     signatories: [],
     pin: '',
     remoteToken: '',
-    slideshow: { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false },
+    slideshow: { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false, transition: 'none' },
     signEffect: defaultSignEffect(),
   };
   store.projects.push(project);

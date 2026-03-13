@@ -951,7 +951,7 @@
   }
 
   // ── Slideshow settings (local edit + save button) ──────────────────────
-  const defaultSlideshow = () => ({ loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false });
+  const defaultSlideshow = () => ({ loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false, transition: 'none' });
   let editSlideshow = $state(null);
   const currentSlideshow = $derived(editSlideshow ?? selectedProject?.slideshow ?? defaultSlideshow());
   const slideshowDirty = $derived(editSlideshow !== null);
@@ -2177,6 +2177,21 @@
                     <span class="toggle-knob"></span>
                   </button>
                 </label>
+
+                <div class="slideshow-row">
+                  <span class="toggle-label">
+                    <strong>슬라이드 전환 효과</strong>
+                    <span class="toggle-desc">슬라이드 넘길 때 적용되는 애니메이션</span>
+                  </span>
+                  <select class="select-input select-input-inline" value={currentSlideshow.transition ?? 'none'}
+                    onchange={e => updateSlideshow('transition', e.target.value)}>
+                    <option value="none">없음 (즉시)</option>
+                    <option value="fade">페이드</option>
+                    <option value="slide">슬라이드</option>
+                    <option value="zoom">줌</option>
+                    <option value="diamond">다이아몬드</option>
+                  </select>
+                </div>
               </div>
 
               <p class="helper-text" style="margin-top:12px;font-size:11px">
@@ -2316,18 +2331,6 @@
                         </div>
                       </div>
                     {/if}
-                  </div>
-
-                  <!-- 슬라이드 전환 (독립) -->
-                  <div class="form-group" style="margin-top:12px">
-                    <label class="field-label">슬라이드 전환 효과</label>
-                    <select class="text-input" value={currentSignEffect.transition} onchange={e => updateSignEffect('transition', e.target.value)}>
-                      <option value="none">없음</option>
-                      <option value="fade">페이드</option>
-                      <option value="slide">슬라이드</option>
-                      <option value="zoom">줌</option>
-                      <option value="diamond">다이아몬드</option>
-                    </select>
                   </div>
 
                   <!-- 미리보기 -->
@@ -2711,7 +2714,6 @@
     border-radius: 8px; color: #e8e0d0; font-size: 14px; font-family: inherit; outline: none; width: 100%; }
   .select-input:focus { border-color: rgba(201,168,76,.4); }
   .select-input-inline { max-width: 240px; }
-  .field-row { display: flex; align-items: center; gap: 12px; }
   .field-label { font-size: 12px; font-weight: 600; color: rgba(232,224,208,.8); letter-spacing: .05em; white-space: nowrap; }
 
   /* ── Slides ── */
@@ -2732,7 +2734,6 @@
     border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 14px;
     transition: background .15s, border-color .15s, opacity .15s; cursor: grab; }
   .slide-row:hover { background: rgba(255,255,255,.1); }
-  .slide-row.summary { border-color: rgba(201,168,76,.4); background: rgba(201,168,76,.04); }
   .slide-row.dragging { opacity: .4; cursor: grabbing; }
   .slide-row.drag-over { border-color: #c9a84c; background: rgba(201,168,76,.08); }
   .drag-handle { font-size: 16px; color: rgba(232,224,208,.5); cursor: grab; user-select: none;
@@ -2744,9 +2745,6 @@
   .slide-info { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
   .slide-filename { font-size: 12px; color: rgba(232,224,208,.85); font-family: monospace;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tag-summary { font-size: 11px; padding: 2px 8px; background: rgba(201,168,76,.18);
-    border: 1px solid rgba(201,168,76,.4); border-radius: 8px; color: #c9a84c;
-    align-self: flex-start; font-weight: 600; }
   .row-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 
   /* ── Signatory form ── */
@@ -2830,12 +2828,6 @@
     background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
     border-radius: 6px; color: rgba(232,224,208,.5); font-size: 12px; font-family: inherit; cursor: pointer; }
   .picker-tab.active { background: rgba(201,168,76,.1); border-color: rgba(201,168,76,.3); color: #c9a84c; }
-  .tab-badge-warn { font-size: 10px; padding: 1px 5px; background: rgba(220,80,60,.2);
-    border: 1px solid rgba(220,80,60,.4); border-radius: 4px; color: #e07070; }
-  .empty-state-warn { padding: 20px; border-radius: 8px; background: rgba(220,80,60,.07);
-    border: 1px solid rgba(220,80,60,.2); color: rgba(232,224,208,.6); font-size: 13px;
-    line-height: 1.7; }
-  .empty-state-warn strong { color: #c9a84c; }
   .picker-hint { font-size: 12px; color: rgba(232,224,208,.6); margin: 0 0 8px; }
   .picker-wrap { position: relative; border-radius: 8px; overflow: hidden; cursor: crosshair;
     user-select: none; border: 1px solid rgba(255,255,255,.1); }
@@ -2926,12 +2918,12 @@
   .modal-card { background: #14141e; border: 1px solid rgba(201,168,76,.25); border-radius: 16px;
     padding: 32px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 16px; }
   .modal-title { font-size: 18px; font-weight: 700; color: #f0e8d8; margin: 0; }
-  .modal-desc { font-size: 14px; color: rgba(232,224,208,.6); margin: 0; }
   .modal-input { font-size: 16px; padding: 14px 16px; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
   /* ── Slideshow settings ── */
   .slideshow-options { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
+  .slideshow-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px;
     padding: 12px 16px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06);
     border-radius: 10px; cursor: pointer; }

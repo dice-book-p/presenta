@@ -298,10 +298,11 @@
   }
 
   // ── Slideshow modes ──────────────────────────────────────────────────────
-  let loopMode = $state(false);        // 반복 모드
-  let autoPlay = $state(false);        // 자동 넘김
-  let autoPlayInterval = $state(5);    // 자동 넘김 간격 (초)
-  let showSlideNumber = $state(false); // 슬라이드 번호 표시
+  let loopMode = $state(false);          // 반복 모드
+  let autoPlay = $state(false);          // 자동 넘김
+  let autoPlayInterval = $state(5);      // 자동 넘김 간격 (초)
+  let showSlideNumber = $state(false);   // 슬라이드 번호 표시
+  let slideshowTransition = $state('none'); // 슬라이드 전환 효과
   let autoPlayTimer = null;
   let boundaryToast = $state('');       // 경계 안내 메시지
   let boundaryToastTimer = null;
@@ -441,7 +442,7 @@
     if (idx === currentSlide) return;
 
     const oldIdx = currentSlide;
-    const transition = effectConfig?.transition || 'none';
+    const transition = slideshowTransition || 'none';
 
     if (transition !== 'none' && !isTransitioning) {
       isTransitioning = true;
@@ -549,6 +550,7 @@
     autoPlay = !!ss.autoPlay;
     autoPlayInterval = Math.max(1, ss.autoPlaySec ?? 5);
     showSlideNumber = !!ss.showSlideNumber;
+    slideshowTransition = ss.transition ?? 'none';
   }
 
   onMount(() => {
@@ -797,7 +799,7 @@
         <video src={playingVideo} autoplay
           onended={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
           onerror={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
-          style="width:100%;height:100%;object-fit:cover"></video>
+          style="width:100%;height:100%;object-fit:fill"></video>
       </div>
     {/if}
 
