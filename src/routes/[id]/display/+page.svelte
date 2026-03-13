@@ -8,7 +8,7 @@
   import { AudioManager } from '$lib/audio-manager.js';
   import { ParticleEngine } from '$lib/particle-engine.js';
   import { SealEffect } from '$lib/seal-effect.js';
-  import { getThemeConfig } from '$lib/effect-themes.js';
+  import { getEffectConfig } from '$lib/effect-themes.js';
 
   // URL 라우트에서 프로젝트 ID 추출
   const projectId = $derived($page.params.id);
@@ -336,7 +336,7 @@
   }
 
   function initEffects(proj, urls) {
-    effectConfig = getThemeConfig(proj?.signEffect);
+    effectConfig = getEffectConfig(proj?.signEffect);
     mediaUrls = urls || {};
     if (!effectConfig) return;
 
@@ -624,7 +624,7 @@
       }
 
       // Mode branching
-      if (!effectConfig || effectConfig.theme === 'none') {
+      if (!effectConfig) {
         // No effect — legacy behavior
         goToSlide(currentSlide + 1);
       } else if (effectConfig.mode === 'video') {

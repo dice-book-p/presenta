@@ -73,23 +73,22 @@ function persist() {
 
 function defaultSignEffect() {
   return {
-    theme: 'none',
     mode: 'realtime',
     bgmId: null,
     bgmMode: 'continuous',
     completeSoundId: null,
     completeSoundVolume: 80,
-    penParticle: true,
+    penParticle: false,
     penColor: '#c9a84c',
     penSize: 'medium',
     penDensity: 'normal',
-    ambientParticle: true,
+    ambientParticle: false,
     ambientColor: '#c9a84c',
     ambientDensity: 'low',
-    sealEffect: true,
+    sealEffect: false,
     sealColor: '#c9a84c',
     sealDuration: 6,
-    transition: 'diamond',
+    transition: 'none',
     autoAdvance: false,
   };
 }

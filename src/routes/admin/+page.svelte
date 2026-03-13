@@ -795,7 +795,7 @@
   // ── Signatory operations ───────────────────────────────────────────────────
   function openNewSig() {
     isNewSig = true;
-    editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, summaryArea: null };
+    editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, summaryArea: null, videoId: null };
     editSigError = '';
     pickerMode = 'canvas';
   }
@@ -915,7 +915,7 @@
   async function changeTab(tab, { replace = false } = {}) {
     activeTab = tab;
     editSig = null;
-    if (tab === 'signatures') await loadSignatures();
+    if (tab === 'signatures') { await loadSignatures(); await loadMediaItems(); }
     if (tab === 'connections') {
       await Promise.all([loadConnStatus(), loadSignatures()]);
       remoteQr = '';
@@ -1060,12 +1060,16 @@
   let mediaPreviewId = $state(null);
 
   // ── Sign effect settings ─────────────────────────────────────────────────
-  const THEME_PRESETS = {
-    none:     { label: '선택 안함' },
-    gold:     { label: '골드 클래식',   color: '#c9a84c' },
-    silver:   { label: '실버 엘레강스', color: '#c0c0c0' },
-    rosegold: { label: '로즈골드',      color: '#b76e79' },
-    custom:   { label: '사용자 정의' },
+  const THEME_QUICK_APPLY = [
+    { key: 'gold',     label: '골드 클래식',   color: '#c9a84c' },
+    { key: 'silver',   label: '실버 엘레강스', color: '#c0c0c0' },
+    { key: 'rosegold', label: '로즈골드',      color: '#b76e79' },
+  ];
+
+  const THEME_VALUES = {
+    gold:     { penParticle: true, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#c9a84c', ambientDensity: 'low', sealEffect: true, sealColor: '#c9a84c', sealDuration: 6, transition: 'diamond' },
+    silver:   { penParticle: true, penColor: '#c0c0c0', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#c0c0c0', ambientDensity: 'low', sealEffect: true, sealColor: '#c0c0c0', sealDuration: 6, transition: 'fade' },
+    rosegold: { penParticle: true, penColor: '#b76e79', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#b76e79', ambientDensity: 'low', sealEffect: true, sealColor: '#b76e79', sealDuration: 6, transition: 'zoom' },
   };
 
   async function saveSignEffect(signEffect) {
@@ -1086,21 +1090,34 @@
     saveSignEffect(se);
   }
 
-  function setSignEffectTheme(theme) {
+  /** 테마 빠른 적용 — 시각 효과 값을 프리셋으로 채움 (오디오/모드/자동이동은 유지) */
+  function applyThemePreset(themeKey) {
     const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
-    se.theme = theme;
+    const preset = THEME_VALUES[themeKey];
+    if (!preset) return;
+    Object.assign(se, preset);
+    saveSignEffect(se);
+  }
+
+  /** 모든 시각 효과 끄기 */
+  function clearVisualEffects() {
+    const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
+    se.penParticle = false;
+    se.ambientParticle = false;
+    se.sealEffect = false;
+    se.transition = 'none';
     saveSignEffect(se);
   }
 
   function getDefaultSignEffect() {
     return {
-      theme: 'none', mode: 'realtime',
+      mode: 'realtime',
       bgmId: null, bgmMode: 'continuous',
       completeSoundId: null, completeSoundVolume: 80,
-      penParticle: true, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal',
-      ambientParticle: true, ambientColor: '#c9a84c', ambientDensity: 'low',
-      sealEffect: true, sealColor: '#c9a84c', sealDuration: 6,
-      transition: 'diamond', autoAdvance: false,
+      penParticle: false, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal',
+      ambientParticle: false, ambientColor: '#c9a84c', ambientDensity: 'low',
+      sealEffect: false, sealColor: '#c9a84c', sealDuration: 6,
+      transition: 'none', autoAdvance: false,
     };
   }
 
@@ -1740,6 +1757,24 @@
                   </div>
                 {/if}
 
+                <!-- 서명 영상 (영상 모드일 때만) -->
+                {#if currentSignEffect.mode === 'video'}
+                  <div class="form-section-label">서명 영상</div>
+                  <div class="form-group">
+                    <label class="field-label">서명 완료 시 재생할 영상</label>
+                    <select class="text-input" value={editSig.videoId ?? ''}
+                      onchange={e => editSig = { ...editSig, videoId: e.target.value || null }}>
+                      <option value="">없음</option>
+                      {#each mediaItems.filter(m => m.type === 'video') as m}
+                        <option value={m.id}>{m.originalFilename}</option>
+                      {/each}
+                    </select>
+                    {#if !mediaItems.some(m => m.type === 'video')}
+                      <p class="helper-text" style="color:rgba(232,160,80,.7)">미디어 라이브러리에 영상을 먼저 업로드하세요.</p>
+                    {/if}
+                  </div>
+                {/if}
+
                 <!-- 위치 설정 -->
                 <div class="form-section-label">위치 설정</div>
 
@@ -2071,102 +2106,130 @@
             <!-- ── 서명 연출 설정 ── -->
             <div class="form-card">
               <div class="form-section-label">서명 연출</div>
-              <p class="helper-text" style="margin-top:-8px">
-                서명 시 오디오/시각 연출 효과를 설정합니다. 테마를 선택하면 전체 효과가 한번에 적용됩니다.
-              </p>
 
-              <!-- 테마 선택 -->
-              <div class="form-group" style="margin-top:12px">
-                <label class="field-label">테마</label>
-                <select class="text-input" value={currentSignEffect.theme} onchange={e => setSignEffectTheme(e.target.value)}>
-                  {#each Object.entries(THEME_PRESETS) as [key, preset]}
-                    <option value={key}>{preset.label}</option>
-                  {/each}
+              <!-- 서명 모드 -->
+              <div class="form-group" style="margin-top:8px">
+                <label class="field-label">서명 모드</label>
+                <select class="text-input" value={currentSignEffect.mode}
+                  onchange={e => updateSignEffect('mode', e.target.value)}>
+                  <option value="realtime">실시간 서명</option>
+                  <option value="video">영상 재생</option>
                 </select>
-                {#if currentSignEffect.theme !== 'none' && currentSignEffect.theme !== 'custom'}
-                  <div class="theme-swatch" style="background:{THEME_PRESETS[currentSignEffect.theme]?.color};width:24px;height:24px;border-radius:50%;display:inline-block;margin-top:6px;box-shadow:0 0 8px {THEME_PRESETS[currentSignEffect.theme]?.color}"></div>
-                {/if}
+                <p class="helper-text" style="margin-top:4px">
+                  {#if currentSignEffect.mode === 'realtime'}
+                    서명 입력이 디스플레이에 실시간으로 표시됩니다.
+                  {:else}
+                    서명 완료 시 서명자별 지정 영상이 풀스크린 재생됩니다. 서명자 편집에서 각 서명자의 영상을 지정하세요.
+                  {/if}
+                </p>
               </div>
 
-              <!-- 사용자 정의 세부 옵션 -->
-              {#if currentSignEffect.theme === 'custom'}
-                <div class="custom-effects-panel" style="margin-top:12px;padding:16px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
-                  <div class="form-section-label" style="font-size:12px">펜 파티클</div>
-                  <label class="toggle-row">
-                    <span class="toggle-label"><strong>펜 파티클</strong></span>
-                    <button class="toggle-switch" class:on={currentSignEffect.penParticle}
-                      onclick={() => updateSignEffect('penParticle', !currentSignEffect.penParticle)}>
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </label>
-                  {#if currentSignEffect.penParticle}
-                    <div class="form-row-2" style="margin-top:8px">
-                      <div class="form-group">
-                        <label class="field-label">색상</label>
-                        <input type="color" value={currentSignEffect.penColor} onchange={e => updateSignEffect('penColor', e.target.value)} />
-                      </div>
-                      <div class="form-group">
-                        <label class="field-label">크기</label>
-                        <select class="text-input" value={currentSignEffect.penSize} onchange={e => updateSignEffect('penSize', e.target.value)}>
-                          <option value="small">소</option><option value="medium">중</option><option value="large">대</option>
-                        </select>
-                      </div>
-                      <div class="form-group">
-                        <label class="field-label">밀도</label>
-                        <select class="text-input" value={currentSignEffect.penDensity} onchange={e => updateSignEffect('penDensity', e.target.value)}>
-                          <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option>
-                        </select>
-                      </div>
-                    </div>
-                  {/if}
+              <!-- 실시간 모드: 시각 효과 -->
+              {#if currentSignEffect.mode === 'realtime'}
+                <div style="margin-top:20px">
+                  <div class="form-section-label" style="font-size:12px">시각 효과</div>
 
-                  <div class="form-section-label" style="font-size:12px;margin-top:12px">배경 파티클</div>
-                  <label class="toggle-row">
-                    <span class="toggle-label"><strong>배경 파티클</strong></span>
-                    <button class="toggle-switch" class:on={currentSignEffect.ambientParticle}
-                      onclick={() => updateSignEffect('ambientParticle', !currentSignEffect.ambientParticle)}>
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </label>
-                  {#if currentSignEffect.ambientParticle}
-                    <div class="form-row-2" style="margin-top:8px">
-                      <div class="form-group">
-                        <label class="field-label">색상</label>
-                        <input type="color" value={currentSignEffect.ambientColor} onchange={e => updateSignEffect('ambientColor', e.target.value)} />
-                      </div>
-                      <div class="form-group">
-                        <label class="field-label">밀도</label>
-                        <select class="text-input" value={currentSignEffect.ambientDensity} onchange={e => updateSignEffect('ambientDensity', e.target.value)}>
-                          <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option>
-                        </select>
-                      </div>
+                  <!-- 테마 빠른 적용 -->
+                  <div class="form-group">
+                    <label class="field-label">테마 빠른 적용</label>
+                    <div class="theme-quick-btns">
+                      {#each THEME_QUICK_APPLY as t}
+                        <button class="theme-btn" onclick={() => applyThemePreset(t.key)}
+                          style="border-color:{t.color};color:{t.color}">
+                          <span class="theme-dot" style="background:{t.color}"></span>
+                          {t.label}
+                        </button>
+                      {/each}
+                      <button class="theme-btn theme-btn-reset" onclick={clearVisualEffects}>
+                        효과 초기화
+                      </button>
                     </div>
-                  {/if}
+                    <p class="helper-text">테마를 누르면 아래 값이 자동으로 채워집니다. 이후 개별 수정 가능합니다.</p>
+                  </div>
 
-                  <div class="form-section-label" style="font-size:12px;margin-top:12px">서명완료 효과</div>
-                  <label class="toggle-row">
-                    <span class="toggle-label"><strong>Seal 이펙트</strong></span>
-                    <button class="toggle-switch" class:on={currentSignEffect.sealEffect}
-                      onclick={() => updateSignEffect('sealEffect', !currentSignEffect.sealEffect)}>
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </label>
-                  {#if currentSignEffect.sealEffect}
-                    <div class="form-row-2" style="margin-top:8px">
-                      <div class="form-group">
-                        <label class="field-label">색상</label>
-                        <input type="color" value={currentSignEffect.sealColor} onchange={e => updateSignEffect('sealColor', e.target.value)} />
+                  <!-- 펜 파티클 -->
+                  <div style="margin-top:12px;padding:14px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
+                    <label class="toggle-row">
+                      <span class="toggle-label"><strong>펜 파티클</strong><span class="toggle-desc">서명 중 펜 궤적에 파티클 표시</span></span>
+                      <button class="toggle-switch" class:on={currentSignEffect.penParticle}
+                        onclick={() => updateSignEffect('penParticle', !currentSignEffect.penParticle)}>
+                        <span class="toggle-knob"></span>
+                      </button>
+                    </label>
+                    {#if currentSignEffect.penParticle}
+                      <div class="form-row-3" style="margin-top:8px">
+                        <div class="form-group">
+                          <label class="field-label">색상</label>
+                          <input type="color" value={currentSignEffect.penColor} onchange={e => updateSignEffect('penColor', e.target.value)} />
+                        </div>
+                        <div class="form-group">
+                          <label class="field-label">크기</label>
+                          <select class="text-input" value={currentSignEffect.penSize} onchange={e => updateSignEffect('penSize', e.target.value)}>
+                            <option value="small">소</option><option value="medium">중</option><option value="large">대</option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label class="field-label">밀도</label>
+                          <select class="text-input" value={currentSignEffect.penDensity} onchange={e => updateSignEffect('penDensity', e.target.value)}>
+                            <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option>
+                          </select>
+                        </div>
                       </div>
-                      <div class="form-group">
-                        <label class="field-label">지속시간 ({currentSignEffect.sealDuration}초)</label>
-                        <input type="range" min="3" max="10" value={currentSignEffect.sealDuration}
-                          onchange={e => updateSignEffect('sealDuration', parseInt(e.target.value))} />
-                      </div>
-                    </div>
-                  {/if}
+                    {/if}
+                  </div>
 
+                  <!-- 배경 파티클 -->
+                  <div style="margin-top:8px;padding:14px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
+                    <label class="toggle-row">
+                      <span class="toggle-label"><strong>배경 파티클</strong><span class="toggle-desc">서명 슬라이드 전체에 반짝이는 입자</span></span>
+                      <button class="toggle-switch" class:on={currentSignEffect.ambientParticle}
+                        onclick={() => updateSignEffect('ambientParticle', !currentSignEffect.ambientParticle)}>
+                        <span class="toggle-knob"></span>
+                      </button>
+                    </label>
+                    {#if currentSignEffect.ambientParticle}
+                      <div class="form-row-2" style="margin-top:8px">
+                        <div class="form-group">
+                          <label class="field-label">색상</label>
+                          <input type="color" value={currentSignEffect.ambientColor} onchange={e => updateSignEffect('ambientColor', e.target.value)} />
+                        </div>
+                        <div class="form-group">
+                          <label class="field-label">밀도</label>
+                          <select class="text-input" value={currentSignEffect.ambientDensity} onchange={e => updateSignEffect('ambientDensity', e.target.value)}>
+                            <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option>
+                          </select>
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+
+                  <!-- 서명완료 Seal 효과 -->
+                  <div style="margin-top:8px;padding:14px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
+                    <label class="toggle-row">
+                      <span class="toggle-label"><strong>서명완료 효과</strong><span class="toggle-desc">서명 완료 시 축하 이펙트</span></span>
+                      <button class="toggle-switch" class:on={currentSignEffect.sealEffect}
+                        onclick={() => updateSignEffect('sealEffect', !currentSignEffect.sealEffect)}>
+                        <span class="toggle-knob"></span>
+                      </button>
+                    </label>
+                    {#if currentSignEffect.sealEffect}
+                      <div class="form-row-2" style="margin-top:8px">
+                        <div class="form-group">
+                          <label class="field-label">색상</label>
+                          <input type="color" value={currentSignEffect.sealColor} onchange={e => updateSignEffect('sealColor', e.target.value)} />
+                        </div>
+                        <div class="form-group">
+                          <label class="field-label">지속시간 ({currentSignEffect.sealDuration}초)</label>
+                          <input type="range" min="3" max="10" value={currentSignEffect.sealDuration}
+                            onchange={e => updateSignEffect('sealDuration', parseInt(e.target.value))} />
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+
+                  <!-- 슬라이드 전환 (독립) -->
                   <div class="form-group" style="margin-top:12px">
-                    <label class="field-label">슬라이드 전환</label>
+                    <label class="field-label">슬라이드 전환 효과</label>
                     <select class="text-input" value={currentSignEffect.transition} onchange={e => updateSignEffect('transition', e.target.value)}>
                       <option value="none">없음</option>
                       <option value="fade">페이드</option>
@@ -2178,76 +2241,61 @@
                 </div>
               {/if}
 
-              <!-- 오디오 (항상 표시) -->
-              {#if currentSignEffect.theme !== 'none'}
-                <div style="margin-top:16px">
-                  <div class="form-section-label" style="font-size:12px">오디오</div>
-                  <div class="form-row-2">
-                    <div class="form-group">
-                      <label class="field-label">BGM</label>
-                      <select class="text-input" value={currentSignEffect.bgmId ?? ''}
-                        onchange={e => updateSignEffect('bgmId', e.target.value || null)}>
-                        <option value="">없음</option>
-                        {#each mediaItems.filter(m => m.type === 'audio') as m}
-                          <option value={m.id}>{m.originalFilename}</option>
-                        {/each}
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label class="field-label">재생 모드</label>
-                      <select class="text-input" value={currentSignEffect.bgmMode}
-                        onchange={e => updateSignEffect('bgmMode', e.target.value)}>
-                        <option value="continuous">구간 연속</option>
-                        <option value="per-sign">서명별</option>
-                      </select>
-                    </div>
+              <!-- 오디오 (양쪽 모드 공통) -->
+              <div style="margin-top:20px">
+                <div class="form-section-label" style="font-size:12px">오디오</div>
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label class="field-label">BGM</label>
+                    <select class="text-input" value={currentSignEffect.bgmId ?? ''}
+                      onchange={e => updateSignEffect('bgmId', e.target.value || null)}>
+                      <option value="">없음</option>
+                      {#each mediaItems.filter(m => m.type === 'audio') as m}
+                        <option value={m.id}>{m.originalFilename}</option>
+                      {/each}
+                    </select>
                   </div>
-                  <div class="form-row-2" style="margin-top:8px">
-                    <div class="form-group">
-                      <label class="field-label">효과음</label>
-                      <select class="text-input" value={currentSignEffect.completeSoundId ?? ''}
-                        onchange={e => updateSignEffect('completeSoundId', e.target.value || null)}>
-                        <option value="">없음</option>
-                        {#each mediaItems.filter(m => m.type === 'audio') as m}
-                          <option value={m.id}>{m.originalFilename}</option>
-                        {/each}
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label class="field-label">효과음 볼륨 ({currentSignEffect.completeSoundVolume}%)</label>
-                      <input type="range" min="0" max="100" value={currentSignEffect.completeSoundVolume}
-                        onchange={e => updateSignEffect('completeSoundVolume', parseInt(e.target.value))} />
-                    </div>
+                  <div class="form-group">
+                    <label class="field-label">재생 모드</label>
+                    <select class="text-input" value={currentSignEffect.bgmMode}
+                      onchange={e => updateSignEffect('bgmMode', e.target.value)}>
+                      <option value="continuous">구간 연속</option>
+                      <option value="per-sign">서명별</option>
+                    </select>
                   </div>
                 </div>
-              {/if}
+                <div class="form-row-2" style="margin-top:8px">
+                  <div class="form-group">
+                    <label class="field-label">서명완료 효과음</label>
+                    <select class="text-input" value={currentSignEffect.completeSoundId ?? ''}
+                      onchange={e => updateSignEffect('completeSoundId', e.target.value || null)}>
+                      <option value="">없음</option>
+                      {#each mediaItems.filter(m => m.type === 'audio') as m}
+                        <option value={m.id}>{m.originalFilename}</option>
+                      {/each}
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="field-label">효과음 볼륨 ({currentSignEffect.completeSoundVolume}%)</label>
+                    <input type="range" min="0" max="100" value={currentSignEffect.completeSoundVolume}
+                      onchange={e => updateSignEffect('completeSoundVolume', parseInt(e.target.value))} />
+                  </div>
+                </div>
+              </div>
 
-              <!-- 기타 -->
-              {#if currentSignEffect.theme !== 'none'}
-                <div style="margin-top:16px">
-                  <div class="form-section-label" style="font-size:12px">기타</div>
-                  <div class="form-row-2">
-                    <div class="form-group">
-                      <label class="field-label">서명 모드</label>
-                      <select class="text-input" value={currentSignEffect.mode}
-                        onchange={e => updateSignEffect('mode', e.target.value)}>
-                        <option value="realtime">실시간</option>
-                        <option value="video">영상</option>
-                      </select>
-                    </div>
-                  </div>
-                  <label class="toggle-row" style="margin-top:8px">
-                    <span class="toggle-label">
-                      <strong>자동 이동</strong>
-                      <span class="toggle-desc">서명 완료 후 자동으로 다음 슬라이드로 이동</span>
-                    </span>
-                    <button class="toggle-switch" class:on={currentSignEffect.autoAdvance}
-                      onclick={() => updateSignEffect('autoAdvance', !currentSignEffect.autoAdvance)}>
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </label>
-                </div>
-              {/if}
+              <!-- 자동 이동 -->
+              <div style="margin-top:16px">
+                <label class="toggle-row">
+                  <span class="toggle-label">
+                    <strong>자동 이동</strong>
+                    <span class="toggle-desc">서명 완료 후 자동으로 다음 슬라이드로 이동</span>
+                  </span>
+                  <button class="toggle-switch" class:on={currentSignEffect.autoAdvance}
+                    onclick={() => updateSignEffect('autoAdvance', !currentSignEffect.autoAdvance)}>
+                    <span class="toggle-knob"></span>
+                  </button>
+                </label>
+              </div>
             </div>
 
             <div class="form-card">
@@ -2586,6 +2634,20 @@
     border-bottom: 1px solid rgba(255,255,255,.05); }
   .form-row-2 { display: flex; gap: 12px; }
   .form-row-2 .form-group { flex: 1; }
+  .form-row-3 { display: flex; gap: 12px; }
+  .form-row-3 .form-group { flex: 1; }
+
+  /* Theme quick-apply buttons */
+  .theme-quick-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .theme-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    background: rgba(255,255,255,.03); border: 1.5px solid rgba(255,255,255,.12);
+    color: rgba(232,224,208,.7); cursor: pointer; font-family: inherit; transition: all .2s;
+  }
+  .theme-btn:hover { background: rgba(255,255,255,.08); transform: translateY(-1px); }
+  .theme-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .theme-btn-reset { border-color: rgba(255,255,255,.08); color: rgba(232,224,208,.4); font-weight: 400; }
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-footer { display: flex; gap: 10px; }
 

@@ -27,7 +27,7 @@ import {
 function resolveMediaUrls(project) {
   const urls = {};
   const se = project?.signEffect;
-  if (!se || se.theme === 'none') return urls;
+  if (!se) return urls;
   if (se.bgmId) {
     const m = getMediaItem(se.bgmId);
     if (m) urls.bgmUrl = m.url;
