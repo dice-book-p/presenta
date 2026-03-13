@@ -39,10 +39,6 @@
     session.data !== null && activeSignId === session.data.signId
   );
   const isVideoMode = $derived(activeProject?.signEffect?.mode === 'video');
-  // 서명자 할당 슬라이드 이미지 URL (배경으로 표시)
-  const mySlideUrl  = $derived(
-    activeProject?.slides?.find(s => s.id === mySignatory?.slideId)?.url ?? null
-  );
 
   function getCtx() {
     if (!canvasEl) return null;
@@ -434,9 +430,6 @@
 
       <!-- 캔버스 (실시간/영상 모드 동일) -->
       <div class="canvas-wrap">
-        {#if mySlideUrl}
-          <img class="canvas-slide-bg" src={mySlideUrl} alt="" />
-        {/if}
         <canvas
           bind:this={canvasEl}
           class="sig-canvas"
@@ -721,17 +714,8 @@
     margin: 24px auto 0;
     border-radius: 14px;
     overflow: hidden;
-    background: #0a0a14;
+    background: #ffffff;
     border: 1px solid rgba(255, 255, 255, 0.12);
-  }
-  .canvas-slide-bg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: fill;
-    opacity: 0.7;
-    pointer-events: none;
   }
 
   .sig-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
