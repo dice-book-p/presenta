@@ -493,6 +493,8 @@
     sidebarOpen = false;
     showGuide = false;
     showMediaTab = false;
+    editSignEffect = null;
+    editSlideshow = null;
     await loadProject(p.id);
     if (replace) replaceNav(p.id, 'slides');
     else pushNav(p.id, 'slides');
@@ -915,6 +917,8 @@
   async function changeTab(tab, { replace = false } = {}) {
     activeTab = tab;
     editSig = null;
+    editSignEffect = null;
+    editSlideshow = null;
     if (tab === 'signatures') { await loadSignatures(); await loadMediaItems(); }
     if (tab === 'connections') {
       await Promise.all([loadConnStatus(), loadSignatures()]);
@@ -945,42 +949,35 @@
     editPinLoaded = true;
   }
 
-  // ── Slideshow settings ──────────────────────────────────────────────────
-  async function saveSlideshowSettings(slideshow) {
-    if (!selectedProject) return;
+  // ── Slideshow settings (local edit + save button) ──────────────────────
+  const defaultSlideshow = () => ({ loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false });
+  let editSlideshow = $state(null);
+  const currentSlideshow = $derived(editSlideshow ?? selectedProject?.slideshow ?? defaultSlideshow());
+  const slideshowDirty = $derived(editSlideshow !== null);
+
+  function initEditSlideshow() {
+    if (!editSlideshow) editSlideshow = { ...(selectedProject?.slideshow ?? defaultSlideshow()) };
+  }
+
+  function updateSlideshow(key, value) {
+    initEditSlideshow();
+    editSlideshow = { ...editSlideshow, [key]: value };
+  }
+
+  async function saveSlideshow() {
+    if (!selectedProject || !editSlideshow) return;
     const pid = selectedProject.id;
     try {
-      const r = await apiPut(`/api/projects/${pid}`, { slideshow });
+      const r = await apiPut(`/api/projects/${pid}`, { slideshow: editSlideshow });
       if (r.ok) {
-        selectedProject = { ...selectedProject, slideshow };
+        selectedProject = { ...selectedProject, slideshow: editSlideshow };
+        editSlideshow = null;
         flash('슬라이드쇼 설정이 저장되었습니다.');
       } else flash('', '설정 저장 실패');
     } catch { flash('', '설정 저장 중 오류 발생'); }
   }
 
-  function toggleSlideshowLoop() {
-    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
-    ss.loop = !ss.loop;
-    saveSlideshowSettings(ss);
-  }
-
-  function toggleSlideshowAutoPlay() {
-    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
-    ss.autoPlay = !ss.autoPlay;
-    saveSlideshowSettings(ss);
-  }
-
-  function toggleSlideNumber() {
-    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false }) };
-    ss.showSlideNumber = !ss.showSlideNumber;
-    saveSlideshowSettings(ss);
-  }
-
-  function setSlideshowInterval(delta) {
-    const ss = { ...(selectedProject?.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 }) };
-    ss.autoPlaySec = Math.max(1, Math.min(60, (ss.autoPlaySec ?? 5) + delta));
-    saveSlideshowSettings(ss);
-  }
+  function resetSlideshow() { editSlideshow = null; }
 
   async function saveProjectPin() {
     if (!selectedProject) return;
@@ -1072,42 +1069,11 @@
     rosegold: { penParticle: true, penColor: '#b76e79', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#b76e79', ambientDensity: 'low', sealEffect: true, sealColor: '#b76e79', sealDuration: 6, transition: 'zoom' },
   };
 
-  async function saveSignEffect(signEffect) {
-    if (!selectedProject) return;
-    const pid = selectedProject.id;
-    try {
-      const r = await apiPut(`/api/projects/${pid}`, { signEffect });
-      if (r.ok) {
-        selectedProject = { ...selectedProject, signEffect };
-        flash('서명 연출 설정이 저장되었습니다.');
-      } else flash('', '설정 저장 실패');
-    } catch { flash('', '설정 저장 중 오류 발생'); }
-  }
-
-  function updateSignEffect(key, value) {
-    const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
-    se[key] = value;
-    saveSignEffect(se);
-  }
-
-  /** 테마 빠른 적용 — 시각 효과 값을 프리셋으로 채움 (오디오/모드/자동이동은 유지) */
-  function applyThemePreset(themeKey) {
-    const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
-    const preset = THEME_VALUES[themeKey];
-    if (!preset) return;
-    Object.assign(se, preset);
-    saveSignEffect(se);
-  }
-
-  /** 모든 시각 효과 끄기 */
-  function clearVisualEffects() {
-    const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
-    se.penParticle = false;
-    se.ambientParticle = false;
-    se.sealEffect = false;
-    se.transition = 'none';
-    saveSignEffect(se);
-  }
+  // ── Sign effect settings (local edit + save button) ────────────────────
+  let editSignEffect = $state(null);
+  let showEffectPreview = $state(false);
+  let previewCanvas = $state(null);
+  let previewEngine = null;
 
   function getDefaultSignEffect() {
     return {
@@ -1121,7 +1087,91 @@
     };
   }
 
-  const currentSignEffect = $derived(selectedProject?.signEffect ?? getDefaultSignEffect());
+  const currentSignEffect = $derived(editSignEffect ?? selectedProject?.signEffect ?? getDefaultSignEffect());
+  const signEffectDirty = $derived(editSignEffect !== null);
+
+  function initEditSignEffect() {
+    if (!editSignEffect) editSignEffect = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
+  }
+
+  function updateSignEffect(key, value) {
+    initEditSignEffect();
+    editSignEffect = { ...editSignEffect, [key]: value };
+  }
+
+  /** 테마 빠른 적용 — 시각 효과 값을 프리셋으로 채움 (오디오/모드/자동이동은 유지) */
+  function applyThemePreset(themeKey) {
+    initEditSignEffect();
+    const preset = THEME_VALUES[themeKey];
+    if (!preset) return;
+    editSignEffect = { ...editSignEffect, ...preset };
+  }
+
+  /** 모든 시각 효과 끄기 */
+  function clearVisualEffects() {
+    initEditSignEffect();
+    editSignEffect = { ...editSignEffect, penParticle: false, ambientParticle: false, sealEffect: false, transition: 'none' };
+  }
+
+  async function saveSignEffect() {
+    if (!selectedProject || !editSignEffect) return;
+    const pid = selectedProject.id;
+    try {
+      const r = await apiPut(`/api/projects/${pid}`, { signEffect: editSignEffect });
+      if (r.ok) {
+        selectedProject = { ...selectedProject, signEffect: editSignEffect };
+        editSignEffect = null;
+        flash('서명 연출 설정이 저장되었습니다.');
+      } else flash('', '설정 저장 실패');
+    } catch { flash('', '설정 저장 중 오류 발생'); }
+  }
+
+  function resetSignEffect() { editSignEffect = null; }
+
+  /** 미리보기 — 현재 설정으로 파티클 + seal 데모 실행 */
+  async function runEffectPreview() {
+    showEffectPreview = true;
+    await import('svelte').then(m => m.tick());
+    if (!previewCanvas) return;
+    const { ParticleEngine } = await import('$lib/particle-engine.js');
+    const { SealEffect } = await import('$lib/seal-effect.js');
+    const se = currentSignEffect;
+    const w = previewCanvas.offsetWidth;
+    const h = previewCanvas.offsetHeight;
+    // cleanup previous
+    if (previewEngine) { previewEngine.destroy(); previewEngine = null; }
+    previewEngine = new ParticleEngine(previewCanvas);
+    previewEngine.resize(w, h);
+    // ambient particles
+    if (se.ambientParticle) previewEngine.startAmbient(se);
+    // pen particle demo — simulate a stroke
+    if (se.penParticle) {
+      let i = 0;
+      const steps = 40;
+      const interval = setInterval(() => {
+        if (i >= steps || !previewEngine) { clearInterval(interval); return; }
+        const t = i / steps;
+        // draw a curved path
+        const x = w * 0.2 + t * w * 0.6;
+        const y = h * 0.5 + Math.sin(t * Math.PI * 2) * h * 0.15;
+        previewEngine.emit(x, y, se);
+        i++;
+      }, 50);
+    }
+    // seal effect after 2.5s
+    if (se.sealEffect) {
+      const previewWrap = previewCanvas.parentElement;
+      setTimeout(() => {
+        const seal = new SealEffect();
+        seal.play(previewWrap, { ...se, sealDuration: 3 }, () => {});
+      }, 2500);
+    }
+    // auto-stop after 6s
+    setTimeout(() => {
+      if (previewEngine) { previewEngine.destroy(); previewEngine = null; }
+      showEffectPreview = false;
+    }, 6000);
+  }
 
   const NAV_ITEMS = [
     { id: 'slides',       label: '슬라이드' },
@@ -2047,7 +2097,10 @@
             </div>
 
             <div class="form-card">
-              <div class="form-section-label">슬라이드쇼 모드</div>
+              <div class="form-section-label">
+                슬라이드쇼 모드
+                {#if slideshowDirty}<span class="unsaved-badge">미저장</span>{/if}
+              </div>
               <p class="helper-text" style="margin-top:-8px">
                 슬라이드쇼(디스플레이) 화면에서 적용되는 재생 설정입니다.
               </p>
@@ -2058,8 +2111,8 @@
                     <strong>반복 모드</strong>
                     <span class="toggle-desc">마지막 슬라이드에서 첫 슬라이드로 순환합니다</span>
                   </span>
-                  <button class="toggle-switch" class:on={selectedProject?.slideshow?.loop}
-                    onclick={toggleSlideshowLoop}>
+                  <button class="toggle-switch" class:on={currentSlideshow.loop}
+                    onclick={() => updateSlideshow('loop', !currentSlideshow.loop)}>
                     <span class="toggle-knob"></span>
                   </button>
                 </label>
@@ -2069,19 +2122,19 @@
                     <strong>자동 넘김</strong>
                     <span class="toggle-desc">설정된 간격으로 슬라이드를 자동 전환합니다</span>
                   </span>
-                  <button class="toggle-switch" class:on={selectedProject?.slideshow?.autoPlay}
-                    onclick={toggleSlideshowAutoPlay}>
+                  <button class="toggle-switch" class:on={currentSlideshow.autoPlay}
+                    onclick={() => updateSlideshow('autoPlay', !currentSlideshow.autoPlay)}>
                     <span class="toggle-knob"></span>
                   </button>
                 </label>
 
-                {#if selectedProject?.slideshow?.autoPlay}
+                {#if currentSlideshow.autoPlay}
                   <div class="interval-setting">
                     <span class="interval-label">자동 넘김 간격</span>
                     <div class="interval-control">
-                      <button class="interval-btn" onclick={() => setSlideshowInterval(-1)}>-</button>
-                      <span class="interval-value">{selectedProject?.slideshow?.autoPlaySec ?? 5}초</span>
-                      <button class="interval-btn" onclick={() => setSlideshowInterval(1)}>+</button>
+                      <button class="interval-btn" onclick={() => updateSlideshow('autoPlaySec', Math.max(1, (currentSlideshow.autoPlaySec ?? 5) - 1))}>-</button>
+                      <span class="interval-value">{currentSlideshow.autoPlaySec ?? 5}초</span>
+                      <button class="interval-btn" onclick={() => updateSlideshow('autoPlaySec', Math.min(60, (currentSlideshow.autoPlaySec ?? 5) + 1))}>+</button>
                     </div>
                   </div>
                 {/if}
@@ -2091,8 +2144,8 @@
                     <strong>슬라이드 번호 표시</strong>
                     <span class="toggle-desc">슬라이드쇼 화면 하단에 현재 번호를 표시합니다</span>
                   </span>
-                  <button class="toggle-switch" class:on={selectedProject?.slideshow?.showSlideNumber}
-                    onclick={toggleSlideNumber}>
+                  <button class="toggle-switch" class:on={currentSlideshow.showSlideNumber}
+                    onclick={() => updateSlideshow('showSlideNumber', !currentSlideshow.showSlideNumber)}>
                     <span class="toggle-knob"></span>
                   </button>
                 </label>
@@ -2101,11 +2154,21 @@
               <p class="helper-text" style="margin-top:12px;font-size:11px">
                 단축키: Space/화살표 = 넘기기, F = 전체화면, L = 반복 토글, A = 자동 토글
               </p>
+
+              {#if slideshowDirty}
+                <div class="form-footer" style="margin-top:12px">
+                  <button class="btn-gold btn-sm" onclick={saveSlideshow}>저장</button>
+                  <button class="btn-ghost btn-sm" onclick={resetSlideshow}>취소</button>
+                </div>
+              {/if}
             </div>
 
             <!-- ── 서명 연출 설정 ── -->
             <div class="form-card">
-              <div class="form-section-label">서명 연출</div>
+              <div class="form-section-label">
+                서명 연출
+                {#if signEffectDirty}<span class="unsaved-badge">미저장</span>{/if}
+              </div>
 
               <!-- 서명 모드 -->
               <div class="form-group" style="margin-top:8px">
@@ -2238,52 +2301,76 @@
                       <option value="diamond">다이아몬드</option>
                     </select>
                   </div>
+
+                  <!-- 미리보기 -->
+                  <div style="margin-top:16px">
+                    <button class="btn-outline btn-sm" onclick={runEffectPreview}
+                      disabled={!currentSignEffect.penParticle && !currentSignEffect.ambientParticle && !currentSignEffect.sealEffect}>
+                      미리보기
+                    </button>
+                    {#if showEffectPreview}
+                      <div class="effect-preview-wrap" style="margin-top:10px;position:relative;width:100%;height:200px;border-radius:12px;overflow:hidden;background:#0d0d14;border:1px solid rgba(255,255,255,.08)">
+                        <canvas bind:this={previewCanvas} width="600" height="200" style="width:100%;height:100%"></canvas>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+                <!-- 오디오 (실시간 모드만) -->
+                <div style="margin-top:20px">
+                  <div class="form-section-label" style="font-size:12px">오디오</div>
+                  <div class="form-row-2">
+                    <div class="form-group">
+                      <label class="field-label">BGM</label>
+                      <select class="text-input" value={currentSignEffect.bgmId ?? ''}
+                        onchange={e => updateSignEffect('bgmId', e.target.value || null)}>
+                        <option value="">없음</option>
+                        {#each mediaItems.filter(m => m.type === 'audio') as m}
+                          <option value={m.id}>{m.originalFilename}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label">재생 모드</label>
+                      <select class="text-input" value={currentSignEffect.bgmMode}
+                        onchange={e => updateSignEffect('bgmMode', e.target.value)}>
+                        <option value="continuous">구간 연속</option>
+                        <option value="per-sign">서명별</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row-2" style="margin-top:8px">
+                    <div class="form-group">
+                      <label class="field-label">서명완료 효과음</label>
+                      <select class="text-input" value={currentSignEffect.completeSoundId ?? ''}
+                        onchange={e => updateSignEffect('completeSoundId', e.target.value || null)}>
+                        <option value="">없음</option>
+                        {#each mediaItems.filter(m => m.type === 'audio') as m}
+                          <option value={m.id}>{m.originalFilename}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label">효과음 볼륨 ({currentSignEffect.completeSoundVolume}%)</label>
+                      <input type="range" min="0" max="100" value={currentSignEffect.completeSoundVolume}
+                        onchange={e => updateSignEffect('completeSoundVolume', parseInt(e.target.value))} />
+                    </div>
+                  </div>
                 </div>
               {/if}
 
-              <!-- 오디오 (양쪽 모드 공통) -->
-              <div style="margin-top:20px">
-                <div class="form-section-label" style="font-size:12px">오디오</div>
-                <div class="form-row-2">
-                  <div class="form-group">
-                    <label class="field-label">BGM</label>
-                    <select class="text-input" value={currentSignEffect.bgmId ?? ''}
-                      onchange={e => updateSignEffect('bgmId', e.target.value || null)}>
-                      <option value="">없음</option>
-                      {#each mediaItems.filter(m => m.type === 'audio') as m}
-                        <option value={m.id}>{m.originalFilename}</option>
-                      {/each}
-                    </select>
-                  </div>
-                  <div class="form-group">
-                    <label class="field-label">재생 모드</label>
-                    <select class="text-input" value={currentSignEffect.bgmMode}
-                      onchange={e => updateSignEffect('bgmMode', e.target.value)}>
-                      <option value="continuous">구간 연속</option>
-                      <option value="per-sign">서명별</option>
-                    </select>
-                  </div>
+              <!-- 영상 모드: 안내 -->
+              {#if currentSignEffect.mode === 'video'}
+                <div style="margin-top:16px;padding:14px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
+                  <p class="helper-text" style="margin:0;color:rgba(232,224,208,.6)">
+                    영상 모드에서는 서명 완료 시 서명자별 지정 영상이 풀스크린 재생됩니다.<br>
+                    영상에 포함된 오디오가 그대로 출력되므로 별도 BGM 설정은 불필요합니다.<br><br>
+                    <strong>서명자 탭</strong>에서 각 서명자를 편집하여 영상을 지정하세요.
+                  </p>
                 </div>
-                <div class="form-row-2" style="margin-top:8px">
-                  <div class="form-group">
-                    <label class="field-label">서명완료 효과음</label>
-                    <select class="text-input" value={currentSignEffect.completeSoundId ?? ''}
-                      onchange={e => updateSignEffect('completeSoundId', e.target.value || null)}>
-                      <option value="">없음</option>
-                      {#each mediaItems.filter(m => m.type === 'audio') as m}
-                        <option value={m.id}>{m.originalFilename}</option>
-                      {/each}
-                    </select>
-                  </div>
-                  <div class="form-group">
-                    <label class="field-label">효과음 볼륨 ({currentSignEffect.completeSoundVolume}%)</label>
-                    <input type="range" min="0" max="100" value={currentSignEffect.completeSoundVolume}
-                      onchange={e => updateSignEffect('completeSoundVolume', parseInt(e.target.value))} />
-                  </div>
-                </div>
-              </div>
+              {/if}
 
-              <!-- 자동 이동 -->
+              <!-- 자동 이동 (공통) -->
               <div style="margin-top:16px">
                 <label class="toggle-row">
                   <span class="toggle-label">
@@ -2296,6 +2383,14 @@
                   </button>
                 </label>
               </div>
+
+              <!-- 저장/취소 -->
+              {#if signEffectDirty}
+                <div class="form-footer" style="margin-top:16px">
+                  <button class="btn-gold btn-sm" onclick={saveSignEffect}>저장</button>
+                  <button class="btn-ghost btn-sm" onclick={resetSignEffect}>취소</button>
+                </div>
+              {/if}
             </div>
 
             <div class="form-card">
@@ -2648,6 +2743,13 @@
   .theme-btn:hover { background: rgba(255,255,255,.08); transform: translateY(-1px); }
   .theme-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .theme-btn-reset { border-color: rgba(255,255,255,.08); color: rgba(232,224,208,.4); font-weight: 400; }
+
+  /* Unsaved badge */
+  .unsaved-badge {
+    display: inline-block; margin-left: 8px; padding: 2px 8px;
+    font-size: 11px; font-weight: 600; border-radius: 4px;
+    background: rgba(232,160,80,.15); color: #e8a050; border: 1px solid rgba(232,160,80,.3);
+  }
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-footer { display: flex; gap: 10px; }
 
