@@ -6,7 +6,7 @@
  * - 주기적 Heartbeat (ping/pong)
  */
 import { WebSocketServer } from 'ws';
-import { getProject, isProjectActive, getActiveProjects } from '../store/projects.js';
+import { getProject, isProjectActive, getActiveProjects, getProjectVideos } from '../store/projects.js';
 import { getMediaItem } from '../store/media.js';
 import { WS_HEARTBEAT_MS } from '../config.js';
 import {
@@ -28,20 +28,29 @@ function resolveMediaUrls(project) {
   const urls = {};
   const se = project?.signEffect;
   if (!se) return urls;
-  if (se.bgmId) {
-    const m = getMediaItem(se.bgmId);
-    if (m) urls.bgmUrl = m.url;
-  }
+  // completeSoundId는 프로젝트 레벨 유지
   if (se.completeSoundId) {
     const m = getMediaItem(se.completeSoundId);
     if (m) urls.completeSoundUrl = m.url;
   }
+  // 서명자별 BGM URL 맵
+  if (project.signatories) {
+    const bgmMap = {};
+    for (const s of project.signatories) {
+      if (s.bgmId) {
+        const m = getMediaItem(s.bgmId);
+        if (m) bgmMap[s.id] = m.url;
+      }
+    }
+    if (Object.keys(bgmMap).length) urls.signatoryBgmUrls = bgmMap;
+  }
   if (se.mode === 'video' && project.signatories) {
     const videoMap = {};
+    const projectVideos = getProjectVideos(project.id);
     for (const s of project.signatories) {
       if (s.videoId) {
-        const m = getMediaItem(s.videoId);
-        if (m) videoMap[s.id] = m.url;
+        const v = projectVideos.find(v => v.id === s.videoId);
+        if (v) videoMap[s.id] = v.url;
       }
     }
     if (Object.keys(videoMap).length) urls.signatoryVideos = videoMap;

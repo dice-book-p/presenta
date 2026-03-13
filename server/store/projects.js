@@ -44,6 +44,9 @@ export async function initProjectsStore() {
         migrated = true;
       }
       if (!p.signEffect) { p.signEffect = defaultSignEffect(); migrated = true; }
+      if (p.signEffect && p.signEffect.ambientStyle === undefined) { p.signEffect.ambientStyle = 'sparkle'; migrated = true; }
+      if (p.signEffect && p.signEffect.ambientSpeed === undefined) { p.signEffect.ambientSpeed = 'normal'; migrated = true; }
+      if (!p.videos) { p.videos = []; migrated = true; }
       // Migration: summarySlideId + summaryArea → displaySlides per-signatory
       for (const sig of (p.signatories ?? [])) {
         if (!sig.displaySlides) {
@@ -91,8 +94,6 @@ function persist() {
 function defaultSignEffect() {
   return {
     mode: 'realtime',
-    bgmId: null,
-    bgmMode: 'continuous',
     completeSoundId: null,
     completeSoundVolume: 80,
     penParticle: false,
@@ -102,6 +103,8 @@ function defaultSignEffect() {
     ambientParticle: false,
     ambientColor: '#c9a84c',
     ambientDensity: 'low',
+    ambientStyle: 'sparkle',
+    ambientSpeed: 'normal',
     sealEffect: false,
     sealColor: '#c9a84c',
     sealDuration: 6,
@@ -166,6 +169,7 @@ export function createProject(name) {
     createdAt: new Date().toISOString(),
     slides: [],
     signatories: [],
+    videos: [],
     pin: '',
     remoteToken: '',
     slideshow: { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false, transition: 'none' },
@@ -216,6 +220,7 @@ export function duplicateProject(id) {
     remoteToken: '',
     // 서명자 ID만 새로 발급, 슬라이드 URL은 공유
     signatories: src.signatories.map(s => ({ ...s, id: randomUUID() })),
+    videos: (src.videos ?? []).map(v => ({ ...v, id: randomUUID() })),
   };
   store.projects.push(copy);
   persist();
@@ -277,7 +282,57 @@ export function updateSignatories(projectId, signatories) {
     canvasArea:   s.canvasArea   || null,
     displaySlides: Array.isArray(s.displaySlides) ? s.displaySlides : [],
     videoId:      s.videoId      || null,
+    bgmId:        s.bgmId        || null,
   }));
   persist();
   return project.signatories;
+}
+
+// ── Project Videos ─────────────────────────────────────────────────────────────
+
+export function getProjectVideos(projectId) {
+  const project = getProject(projectId);
+  if (!project) return [];
+  return project.videos ?? [];
+}
+
+export function addProjectVideo(projectId, { filename, url, originalFilename, signatoryId = null }) {
+  const project = getProject(projectId);
+  if (!project) return null;
+  if (!project.videos) project.videos = [];
+  const video = {
+    id: randomUUID(),
+    filename,
+    originalFilename: originalFilename || filename,
+    url,
+    signatoryId,
+    createdAt: new Date().toISOString(),
+  };
+  project.videos.push(video);
+  persist();
+  return video;
+}
+
+export function deleteProjectVideo(projectId, videoId) {
+  const project = getProject(projectId);
+  if (!project || !project.videos) return false;
+  const before = project.videos.length;
+  project.videos = project.videos.filter(v => v.id !== videoId);
+  if (project.videos.length === before) return false;
+  // also clear signatoryId references
+  for (const sig of (project.signatories ?? [])) {
+    if (sig.videoId === videoId) sig.videoId = null;
+  }
+  persist();
+  return true;
+}
+
+export function updateProjectVideoSignatory(projectId, videoId, signatoryId) {
+  const project = getProject(projectId);
+  if (!project?.videos) return null;
+  const video = project.videos.find(v => v.id === videoId);
+  if (!video) return null;
+  video.signatoryId = signatoryId ?? null;
+  persist();
+  return video;
 }

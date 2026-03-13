@@ -39,14 +39,21 @@
     session.data !== null && activeSignId === session.data.signId
   );
   const isVideoMode = $derived(activeProject?.signEffect?.mode === 'video');
+  // 서명자 할당 슬라이드 이미지 URL (배경으로 표시)
+  const mySlideUrl  = $derived(
+    activeProject?.slides?.find(s => s.id === mySignatory?.slideId)?.url ?? null
+  );
 
   function getCtx() {
     if (!canvasEl) return null;
     const c = canvasEl.getContext('2d');
-    c.lineWidth   = 6;
+    const color = mySignatory?.color || '#ffffff';
+    c.lineWidth   = 10;
     c.lineCap     = 'round';
     c.lineJoin    = 'round';
-    c.strokeStyle = '#1a1a2e';
+    c.strokeStyle = color;       // 어드민에서 설정한 서명자 색상
+    c.shadowColor = color;
+    c.shadowBlur  = 22;
     return c;
   }
 
@@ -132,7 +139,10 @@
     const py = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
     const ctx = getCtx();
     if (ctx) {
-      // 베지어 곡선 스무딩: 이전 점과 현재 점의 중간을 끝점으로, 이전 점을 제어점으로
+      // 속도 기반 두께 — 빠를수록 얇고 느릴수록 굵어져서 서예 느낌
+      const speed = Math.sqrt((px - lastX) ** 2 + (py - lastY) ** 2);
+      ctx.lineWidth = Math.max(5, Math.min(13, 13 - speed * 0.22));
+      // 베지어 곡선 스무딩: 이전 점과 현재 점의 중간을 끝점으로
       const midX = (lastX + px) / 2;
       const midY = (lastY + py) / 2;
       ctx.quadraticCurveTo(lastX, lastY, midX, midY);
@@ -424,6 +434,9 @@
 
       <!-- 캔버스 (실시간/영상 모드 동일) -->
       <div class="canvas-wrap">
+        {#if mySlideUrl}
+          <img class="canvas-slide-bg" src={mySlideUrl} alt="" />
+        {/if}
         <canvas
           bind:this={canvasEl}
           class="sig-canvas"
@@ -708,8 +721,17 @@
     margin: 24px auto 0;
     border-radius: 14px;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.97);
-    border: 2px solid rgba(255, 255, 255, 0.12);
+    background: #0a0a14;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .canvas-slide-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    opacity: 0.7;
+    pointer-events: none;
   }
 
   .sig-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }

@@ -74,12 +74,13 @@
     const canvas = canvasRefs[sig.id];
     if (!canvas) return null;
     const ctx = canvas.getContext('2d');
-    ctx.lineWidth   = 6;
+    const color = sig.color || '#c9a84c';
+    ctx.lineWidth   = 10;
     ctx.lineCap     = 'round';
     ctx.lineJoin    = 'round';
-    ctx.strokeStyle = sig.color || '#ffffff';
-    ctx.shadowColor = 'rgba(0,0,0,0.65)';
-    ctx.shadowBlur  = 3;
+    ctx.strokeStyle = color;        // 서명자 색상 (어드민 설정값)
+    ctx.shadowColor = color;        // 동일 색상으로 glow
+    ctx.shadowBlur  = 22;
     ctxMap[sig.id]  = ctx;
     return ctx;
   }
@@ -117,6 +118,9 @@
     }
     const midX = (state.lastX + px) / 2;
     const midY = (state.lastY + py) / 2;
+    // 속도 기반 두께 변화 (서예 느낌)
+    const speed = Math.sqrt((px - state.lastX) ** 2 + (py - state.lastY) ** 2);
+    ctx.lineWidth = Math.max(5, Math.min(13, 13 - speed * 0.22));
     ctx.quadraticCurveTo(state.lastX, state.lastY, midX, midY);
     ctx.stroke();
     ctx.beginPath();
@@ -159,10 +163,10 @@
       }
     }
 
-    // Per-sign BGM: start on first draw
-    if (effectConfig?.bgmMode === 'per-sign' && effectConfig?.bgmId && !bgmPlaying && msg.action === 'start') {
-      audioManager?.ensureResumed();
-      audioManager?.startBgm({ fadeIn: 1, loop: true });
+    // 서명자별 BGM: 서명 시작 시 재생
+    if (effectConfig && msg.action === 'start' && audioManager) {
+      audioManager.ensureResumed();
+      audioManager.startBgm(msg.signId, { fadeIn: 1, loop: true });
       bgmPlaying = true;
     }
 
@@ -359,7 +363,12 @@
 
     // Audio
     audioManager = new AudioManager();
-    if (mediaUrls.bgmUrl) audioManager.preloadBgm(mediaUrls.bgmUrl);
+    // 서명자별 BGM preload
+    if (mediaUrls.signatoryBgmUrls) {
+      for (const [signId, url] of Object.entries(mediaUrls.signatoryBgmUrls)) {
+        audioManager.preloadBgm(signId, url);
+      }
+    }
     if (mediaUrls.completeSoundUrl) audioManager.preloadComplete(mediaUrls.completeSoundUrl);
 
     // Particles
@@ -391,21 +400,8 @@
     videoBlobUrls = {};
   }
 
-  function handleBgmForSlide(newIdx, oldIdx) {
-    if (!effectConfig || !audioManager || !effectConfig.bgmId) return;
-    if (effectConfig.bgmMode !== 'continuous') return;
-
-    const wasInRange = oldIdx >= 0 && isInSignRange(oldIdx);
-    const nowInRange = isInSignRange(newIdx);
-
-    if (nowInRange && !bgmPlaying) {
-      audioManager.ensureResumed();
-      audioManager.startBgm({ fadeIn: 1.5, loop: true });
-      bgmPlaying = true;
-    } else if (!nowInRange && bgmPlaying) {
-      audioManager.stopBgm({ fadeOut: 1.5 });
-      bgmPlaying = false;
-    }
+  function handleBgmForSlide(_newIdx, _oldIdx) {
+    // BGM은 이제 서명자별 재생 — 슬라이드 이동으로는 처리 불필요
   }
 
   function handleAmbientForSlide(newIdx) {
@@ -635,9 +631,9 @@
         audioManager.playCompleteSound(effectConfig.completeSoundVolume ?? 80);
       }
 
-      // Per-sign BGM fadeOut
-      if (effectConfig?.bgmMode === 'per-sign' && bgmPlaying && audioManager) {
-        audioManager.stopBgm({ fadeOut: 1 });
+      // 서명자 BGM fadeOut (해당 서명자 BGM만 중지)
+      if (bgmPlaying && audioManager) {
+        audioManager.stopBgm({ fadeOut: 1, signId: msg.signId });
         bgmPlaying = false;
       }
 
