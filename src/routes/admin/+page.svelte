@@ -791,7 +791,7 @@
   // ── Signatory operations ───────────────────────────────────────────────────
   function openNewSig() {
     isNewSig = true;
-    editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, displaySlides: [], videoId: null };
+    editSig  = { id: '', order: 0, title: '', name: '', color: '#ffffff', slideId: null, canvasArea: null, displaySlides: [], videoId: null, bgmId: null };
     editSigError = '';
     pickerTarget = 'canvas';
   }
@@ -1065,24 +1065,26 @@
   ];
 
   const THEME_VALUES = {
-    gold:     { penParticle: true, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#c9a84c', ambientDensity: 'low', sealEffect: true, sealColor: '#c9a84c', sealDuration: 6, transition: 'diamond' },
-    silver:   { penParticle: true, penColor: '#c0c0c0', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#c0c0c0', ambientDensity: 'low', sealEffect: true, sealColor: '#c0c0c0', sealDuration: 6, transition: 'fade' },
-    rosegold: { penParticle: true, penColor: '#b76e79', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#b76e79', ambientDensity: 'low', sealEffect: true, sealColor: '#b76e79', sealDuration: 6, transition: 'zoom' },
+    gold:     { penParticle: true, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#c9a84c', ambientDensity: 'low', ambientStyle: 'sparkle', ambientSpeed: 'normal', sealEffect: true, sealColor: '#c9a84c', sealDuration: 6, transition: 'diamond' },
+    silver:   { penParticle: true, penColor: '#c0c0c0', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#c0c0c0', ambientDensity: 'low', ambientStyle: 'sparkle', ambientSpeed: 'slow',   sealEffect: true, sealColor: '#c0c0c0', sealDuration: 6, transition: 'fade' },
+    rosegold: { penParticle: true, penColor: '#b76e79', penSize: 'medium', penDensity: 'normal', ambientParticle: true, ambientColor: '#b76e79', ambientDensity: 'low', ambientStyle: 'mixed',   ambientSpeed: 'normal', sealEffect: true, sealColor: '#b76e79', sealDuration: 6, transition: 'zoom' },
   };
 
   // ── Sign effect settings (local edit + save button) ────────────────────
   let editSignEffect = $state(null);
-  let showEffectPreview = $state(false);
+  let previewMode = $state(null); // null | 'ambient' | 'pen' | 'full'
   let previewCanvas = $state(null);
+  let previewSealEl = $state(null);
   let previewEngine = null;
+  let previewStopTimer = null;
 
   function getDefaultSignEffect() {
     return {
       mode: 'realtime',
-      bgmId: null, bgmMode: 'continuous',
       completeSoundId: null, completeSoundVolume: 80,
       penParticle: false, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal',
       ambientParticle: false, ambientColor: '#c9a84c', ambientDensity: 'low',
+      ambientStyle: 'sparkle', ambientSpeed: 'normal',
       sealEffect: false, sealColor: '#c9a84c', sealDuration: 6,
       transition: 'none', autoAdvance: false,
     };
@@ -1129,50 +1131,123 @@
 
   function resetSignEffect() { editSignEffect = null; }
 
-  /** 미리보기 — 현재 설정으로 파티클 + seal 데모 실행 */
-  async function runEffectPreview() {
-    showEffectPreview = true;
+  async function startPreview(mode) {
+    stopPreview();
+    previewMode = mode;
     await import('svelte').then(m => m.tick());
     if (!previewCanvas) return;
+
     const { ParticleEngine } = await import('$lib/particle-engine.js');
     const { SealEffect } = await import('$lib/seal-effect.js');
     const se = currentSignEffect;
-    const w = previewCanvas.offsetWidth;
-    const h = previewCanvas.offsetHeight;
-    // cleanup previous
-    if (previewEngine) { previewEngine.destroy(); previewEngine = null; }
+    const w  = previewCanvas.offsetWidth;
+    const h  = previewCanvas.offsetHeight;
+
     previewEngine = new ParticleEngine(previewCanvas);
     previewEngine.resize(w, h);
-    // ambient particles
-    if (se.ambientParticle) previewEngine.startAmbient(se);
-    // pen particle demo — simulate a stroke
-    if (se.penParticle) {
-      let i = 0;
-      const steps = 40;
-      const interval = setInterval(() => {
-        if (i >= steps || !previewEngine) { clearInterval(interval); return; }
-        const t = i / steps;
-        // draw a curved path
-        const x = w * 0.2 + t * w * 0.6;
-        const y = h * 0.5 + Math.sin(t * Math.PI * 2) * h * 0.15;
-        previewEngine.emit(x, y, se);
-        i++;
-      }, 50);
+
+    if (mode === 'ambient' || mode === 'full') {
+      if (se.ambientParticle) previewEngine.startAmbient(se);
     }
-    // seal effect after 2.5s
-    if (se.sealEffect) {
-      const previewWrap = previewCanvas.parentElement;
+
+    if (mode === 'pen' || mode === 'full') {
+      if (se.penParticle) {
+        let i = 0;
+        const steps = 60;
+        const iv = setInterval(() => {
+          if (i >= steps || !previewEngine) { clearInterval(iv); return; }
+          const t  = i / steps;
+          // simulate "박상헌" stroke shape
+          const x = w * 0.15 + t * w * 0.70;
+          const y = h * 0.55 + Math.sin(t * Math.PI * 3) * h * 0.18;
+          previewEngine.emit(x, y, se);
+          i++;
+        }, 40);
+      }
+    }
+
+    if (mode === 'full' && se.sealEffect) {
       setTimeout(() => {
-        const seal = new SealEffect();
-        seal.play(previewWrap, { ...se, sealDuration: 3 }, () => {});
-      }, 2500);
+        if (previewSealEl) {
+          const seal = new SealEffect();
+          seal.play(previewSealEl, { ...se, sealDuration: 3 }, () => {});
+        }
+      }, 2800);
     }
-    // auto-stop after 6s
-    setTimeout(() => {
-      if (previewEngine) { previewEngine.destroy(); previewEngine = null; }
-      showEffectPreview = false;
-    }, 6000);
+
+    const timeout = mode === 'ambient' ? 8000 : mode === 'pen' ? 4000 : 7000;
+    previewStopTimer = setTimeout(() => stopPreview(), timeout);
   }
+
+  function stopPreview() {
+    clearTimeout(previewStopTimer);
+    if (previewEngine) { previewEngine.destroy(); previewEngine = null; }
+    previewMode = null;
+  }
+
+  // ── Project videos ──────────────────────────────────────────────────────────
+  let projectVideos = $state([]);
+  let videoUploading = $state(false);
+  let videoUploadInput = $state(null);
+
+  async function loadProjectVideos(pid) {
+    if (!pid) { projectVideos = []; return; }
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${pid}/videos`, { credentials: 'include' });
+      if (r.ok) projectVideos = await r.json();
+    } catch { projectVideos = []; }
+  }
+
+  async function uploadProjectVideo(file) {
+    if (!selectedProject || !file) return;
+    videoUploading = true;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/videos`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: fd,
+      });
+      if (r.ok) {
+        const v = await r.json();
+        projectVideos = [...projectVideos, v];
+        flash('영상이 업로드되었습니다.');
+      } else {
+        const e = await r.json().catch(() => ({}));
+        flash('', e.error || '업로드 실패');
+      }
+    } catch { flash('', '업로드 중 오류'); }
+    videoUploading = false;
+  }
+
+  async function deleteProjectVideoItem(videoId) {
+    if (!selectedProject) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/projects/${selectedProject.id}/videos/${videoId}`, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      if (r.ok) {
+        projectVideos = projectVideos.filter(v => v.id !== videoId);
+        flash('영상이 삭제되었습니다.');
+      }
+    } catch { flash('', '삭제 중 오류'); }
+  }
+
+  async function assignVideoToSignatory(videoId, signatoryId) {
+    if (!selectedProject) return;
+    try {
+      await fetch(`${API_BASE}/api/projects/${selectedProject.id}/videos/${videoId}/signatory`, {
+        method: 'PUT', headers: authHeaders(),
+        body: JSON.stringify({ signatoryId }),
+      });
+      projectVideos = projectVideos.map(v => v.id === videoId ? { ...v, signatoryId } : v);
+    } catch {}
+  }
+
+  $effect(() => {
+    if (selectedProject?.id) loadProjectVideos(selectedProject.id);
+  });
 
   const NAV_ITEMS = [
     { id: 'slides',       label: '슬라이드' },
@@ -1515,8 +1590,8 @@
             <!-- 업로드 -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="media-upload-zone" ondragover={e => e.preventDefault()} ondrop={handleMediaDrop}>
-              <p class="helper-text">음원(MP3, WAV, OGG) 또는 영상(WebM 권장, MP4) — 영상은 WebM이 더 작은 파일 크기를 제공합니다</p>
-              <input type="file" accept=".mp3,.wav,.ogg,.webm,.mp4,audio/*,video/webm,video/mp4" style="display:none" id="media-file-input"
+              <p class="helper-text">음원(MP3, WAV, OGG, AAC) 전용 — WebM/MP4 영상은 각 프로젝트 설정에서 관리합니다</p>
+              <input type="file" accept="audio/*,.mp3,.wav,.ogg,.aac,.flac" style="display:none" id="media-file-input"
                 onchange={e => { if (e.target.files[0]) uploadMediaFile(e.target.files[0]); e.target.value = ''; }} />
               <button class="btn-gold btn-sm" disabled={mediaUploading}
                 onclick={() => document.getElementById('media-file-input').click()}>
@@ -1793,6 +1868,22 @@
                   </div>
                 {/if}
 
+                <!-- 서명자 BGM -->
+                {#if currentSignEffect.mode !== 'video'}
+                  <div class="form-section-label">BGM</div>
+                  <div class="form-group">
+                    <label class="field-label">서명 중 재생할 음악</label>
+                    <select class="text-input" value={editSig.bgmId ?? ''}
+                      onchange={e => editSig = { ...editSig, bgmId: e.target.value || null }}>
+                      <option value="">없음</option>
+                      {#each mediaItems.filter(m => m.type === 'audio') as m}
+                        <option value={m.id}>{m.originalFilename}</option>
+                      {/each}
+                    </select>
+                    <p class="helper-text">서명이 시작되면 재생되고, 서명 완료 시 자동으로 종료됩니다.</p>
+                  </div>
+                {/if}
+
                 <!-- 서명 영상 (영상 모드일 때만) -->
                 {#if currentSignEffect.mode === 'video'}
                   <div class="form-section-label">서명 영상</div>
@@ -1801,12 +1892,12 @@
                     <select class="text-input" value={editSig.videoId ?? ''}
                       onchange={e => editSig = { ...editSig, videoId: e.target.value || null }}>
                       <option value="">없음</option>
-                      {#each mediaItems.filter(m => m.type === 'video') as m}
-                        <option value={m.id}>{m.originalFilename}</option>
+                      {#each projectVideos as v}
+                        <option value={v.id}>{v.originalFilename}</option>
                       {/each}
                     </select>
-                    {#if !mediaItems.some(m => m.type === 'video')}
-                      <p class="helper-text" style="color:rgba(232,160,80,.7)">미디어 라이브러리에 영상을 먼저 업로드하세요.</p>
+                    {#if projectVideos.length === 0}
+                      <p class="helper-text" style="color:rgba(232,160,80,.7)">설정 탭에서 프로젝트 영상을 먼저 업로드하세요.</p>
                     {/if}
                   </div>
                 {/if}
@@ -2306,6 +2397,27 @@
                           </select>
                         </div>
                       </div>
+                      <div class="form-row-2" style="margin-top:8px">
+                        <div class="form-group">
+                          <label class="field-label">파티클 스타일</label>
+                          <select class="text-input" value={currentSignEffect.ambientStyle ?? 'sparkle'}
+                            onchange={e => updateSignEffect('ambientStyle', e.target.value)}>
+                            <option value="sparkle">스파클 (✦ + 별)</option>
+                            <option value="dust">먼지 (점)</option>
+                            <option value="stars">별똥별 (스트릭 중심)</option>
+                            <option value="mixed">혼합 (모든 타입)</option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label class="field-label">이동 속도</label>
+                          <select class="text-input" value={currentSignEffect.ambientSpeed ?? 'normal'}
+                            onchange={e => updateSignEffect('ambientSpeed', e.target.value)}>
+                            <option value="slow">느림</option>
+                            <option value="normal">보통</option>
+                            <option value="fast">빠름</option>
+                          </select>
+                        </div>
+                      </div>
                     {/if}
                   </div>
 
@@ -2335,42 +2447,51 @@
 
                   <!-- 미리보기 -->
                   <div style="margin-top:16px">
-                    <button class="btn-outline btn-sm" onclick={runEffectPreview}
-                      disabled={!currentSignEffect.penParticle && !currentSignEffect.ambientParticle && !currentSignEffect.sealEffect}>
-                      미리보기
-                    </button>
-                    {#if showEffectPreview}
-                      <div class="effect-preview-wrap" style="margin-top:10px;position:relative;width:100%;height:200px;border-radius:12px;overflow:hidden;background:#0d0d14;border:1px solid rgba(255,255,255,.08)">
-                        <canvas bind:this={previewCanvas} width="600" height="200" style="width:100%;height:100%"></canvas>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                      <span style="font-size:12px;color:rgba(232,224,208,.5)">미리보기:</span>
+                      <button class="btn-outline btn-sm" class:active={previewMode==='ambient'}
+                        onclick={() => previewMode === 'ambient' ? stopPreview() : startPreview('ambient')}
+                        disabled={!currentSignEffect.ambientParticle}>
+                        배경 파티클
+                      </button>
+                      <button class="btn-outline btn-sm" class:active={previewMode==='pen'}
+                        onclick={() => previewMode === 'pen' ? stopPreview() : startPreview('pen')}
+                        disabled={!currentSignEffect.penParticle}>
+                        펜 파티클
+                      </button>
+                      <button class="btn-outline btn-sm" class:active={previewMode==='full'}
+                        onclick={() => previewMode === 'full' ? stopPreview() : startPreview('full')}
+                        disabled={!currentSignEffect.penParticle && !currentSignEffect.ambientParticle && !currentSignEffect.sealEffect}>
+                        전체 효과
+                      </button>
+                      {#if previewMode}
+                        <button class="btn-ghost btn-sm" onclick={stopPreview}>정지</button>
+                      {/if}
+                    </div>
+                    {#if previewMode}
+                      <div class="effect-preview-wrap" bind:this={previewSealEl}
+                        style="margin-top:10px;position:relative;width:100%;height:260px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.08)">
+                        {#if selectedProject?.slides?.length}
+                          <img src={selectedProject.slides.slice().sort((a,b)=>a.order-b.order)[0]?.url}
+                            alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;opacity:0.85" />
+                        {:else}
+                          <div style="position:absolute;inset:0;background:linear-gradient(135deg,#0d0d14 0%,#1a1228 100%)"></div>
+                        {/if}
+                        <canvas bind:this={previewCanvas} width="800" height="260"
+                          style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+                        <div style="position:absolute;bottom:8px;left:12px;font-size:11px;color:rgba(255,255,255,.3)">
+                          {previewMode === 'ambient' ? '배경 파티클 미리보기' : previewMode === 'pen' ? '펜 파티클 미리보기' : '전체 효과 미리보기'}
+                        </div>
                       </div>
                     {/if}
                   </div>
                 </div>
 
-                <!-- 오디오 (실시간 모드만) -->
+                <!-- 오디오 (서명완료 효과음 — 프로젝트 레벨) -->
                 <div style="margin-top:20px">
                   <div class="form-section-label" style="font-size:12px">오디오</div>
+                  <p class="helper-text" style="margin-bottom:8px">BGM은 서명자 탭에서 각 서명자별로 설정하세요.</p>
                   <div class="form-row-2">
-                    <div class="form-group">
-                      <label class="field-label">BGM</label>
-                      <select class="text-input" value={currentSignEffect.bgmId ?? ''}
-                        onchange={e => updateSignEffect('bgmId', e.target.value || null)}>
-                        <option value="">없음</option>
-                        {#each mediaItems.filter(m => m.type === 'audio') as m}
-                          <option value={m.id}>{m.originalFilename}</option>
-                        {/each}
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label class="field-label">재생 모드</label>
-                      <select class="text-input" value={currentSignEffect.bgmMode}
-                        onchange={e => updateSignEffect('bgmMode', e.target.value)}>
-                        <option value="continuous">구간 연속</option>
-                        <option value="per-sign">서명별</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="form-row-2" style="margin-top:8px">
                     <div class="form-group">
                       <label class="field-label">서명완료 효과음</label>
                       <select class="text-input" value={currentSignEffect.completeSoundId ?? ''}
@@ -2390,13 +2511,52 @@
                 </div>
               {/if}
 
-              <!-- 영상 모드: 안내 -->
+              <!-- 영상 모드: 안내 + 영상 관리 -->
               {#if currentSignEffect.mode === 'video'}
                 <div style="margin-top:16px;padding:14px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
                   <p class="helper-text" style="margin:0;color:rgba(232,224,208,.6)">
                     영상 모드에서는 서명 완료 시 서명자별 지정 영상이 풀스크린 재생됩니다.<br>
                     영상에 포함된 오디오가 그대로 출력되므로 별도 BGM 설정은 불필요합니다.<br><br>
                     <strong>서명자 탭</strong>에서 각 서명자를 편집하여 영상을 지정하세요.
+                  </p>
+                </div>
+
+                <!-- 영상 관리 (video 모드) -->
+                <div class="form-group" style="margin-top:16px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <label class="field-label">서명 영상 관리</label>
+                    <label class="btn-outline btn-sm" style="cursor:pointer">
+                      {#if videoUploading}업로드 중...{:else}영상 추가{/if}
+                      <input bind:this={videoUploadInput} type="file" accept="video/*,.webm,.mp4"
+                        style="display:none" disabled={videoUploading}
+                        onchange={e => { const f = e.target.files?.[0]; if (f) uploadProjectVideo(f); e.target.value=''; }} />
+                    </label>
+                  </div>
+                  {#if projectVideos.length === 0}
+                    <p style="font-size:12px;color:rgba(232,224,208,.4);padding:12px 0">
+                      등록된 영상이 없습니다. "영상 추가"로 업로드하세요. (WebM 권장, 최대 20MB)
+                    </p>
+                  {:else}
+                    <div style="display:flex;flex-direction:column;gap:6px">
+                      {#each projectVideos as v}
+                        <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 10px">
+                          <span style="flex:1;font-size:12px;color:rgba(232,224,208,.8);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{v.originalFilename}</span>
+                          <select class="select-input" style="max-width:160px;font-size:12px;padding:4px 8px"
+                            value={v.signatoryId ?? ''}
+                            onchange={e => assignVideoToSignatory(v.id, e.target.value || null)}>
+                            <option value="">서명자 미지정</option>
+                            {#each (selectedProject?.signatories ?? []) as sig}
+                              <option value={sig.id}>{sig.name || sig.title || `서명자 ${sig.order}`}</option>
+                            {/each}
+                          </select>
+                          <button class="btn-ghost btn-xs" style="color:#e07070"
+                            onclick={() => deleteProjectVideoItem(v.id)}>삭제</button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                  <p style="font-size:11px;color:rgba(232,224,208,.35);margin-top:6px">
+                    WebM 권장 (최대 20MB). 서명자별로 재생할 영상을 지정하세요.
                   </p>
                 </div>
               {/if}

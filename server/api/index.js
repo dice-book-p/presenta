@@ -13,6 +13,7 @@ import {
   duplicateProject, addSlide, reorderSlides, removeSlide, updateSignatories,
   getActiveProjects, activateProject, deactivateProject, isProjectActive,
   updateProjectPin, isReady,
+  getProjectVideos, addProjectVideo, deleteProjectVideo, updateProjectVideoSignatory,
 } from '../store/projects.js';
 import {
   getSignatures, saveSignature, clearSignatures, clearOneSignature,
@@ -332,6 +333,65 @@ async function deleteMediaHandler({ res, params }) {
   json(res, 200, { ok: true });
 }
 
+// ── Project Videos ─────────────────────────────────────────────────────────────
+
+async function listProjectVideosHandler({ res, params }) {
+  const project = getProject(params.id);
+  if (!project) { notFound(res); return; }
+  json(res, 200, getProjectVideos(params.id));
+}
+
+async function uploadProjectVideoHandler({ req, res, params }) {
+  const project = getProject(params.id);
+  if (!project) { notFound(res); return; }
+
+  let uploaded = null;
+  let tooLarge = false;
+
+  await new Promise((resolve) => {
+    const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_VIDEO_BYTES }, defParamCharset: 'utf8' });
+    busboy.on('file', (_field, stream, info) => {
+      const chunks = [];
+      stream.on('data', c => chunks.push(c));
+      stream.on('limit', () => { tooLarge = true; stream.resume(); });
+      stream.on('end', () => { if (!tooLarge) uploaded = { buffer: Buffer.concat(chunks), filename: info.filename, contentType: info.mimeType }; });
+    });
+    busboy.on('close', resolve);
+    busboy.on('error', resolve);
+    req.pipe(busboy);
+  });
+
+  if (!uploaded) { json(res, 400, { error: '파일 없음' }); return; }
+  if (!ALLOWED_VIDEO_TYPES.has(uploaded.contentType)) { json(res, 400, { error: '지원하지 않는 형식' }); return; }
+  if (tooLarge || uploaded.buffer.length > MAX_VIDEO_BYTES) { json(res, 413, { error: '파일 크기 초과 (최대 20MB)' }); return; }
+
+  try {
+    const { filename, url } = await uploadMediaFile(uploaded.filename, uploaded.buffer, uploaded.contentType);
+    const video = addProjectVideo(params.id, { filename, url, originalFilename: uploaded.filename });
+    json(res, 201, video);
+  } catch (e) {
+    json(res, 500, { error: e.message });
+  }
+}
+
+async function deleteProjectVideoHandler({ res, params }) {
+  const project = getProject(params.id);
+  if (!project) { notFound(res); return; }
+  const videos = getProjectVideos(params.id);
+  const video = videos.find(v => v.id === params.videoId);
+  if (!video) { notFound(res); return; }
+  deleteMediaFile(video.filename).catch(e => console.error('[api] deleteMediaFile:', e.message));
+  deleteProjectVideo(params.id, params.videoId);
+  json(res, 200, { ok: true });
+}
+
+async function updateProjectVideoSignatoryHandler({ req, res, params }) {
+  const body = await readBody(req);
+  const video = updateProjectVideoSignatory(params.id, params.videoId, body.signatoryId ?? null);
+  if (!video) { notFound(res); return; }
+  json(res, 200, video);
+}
+
 // ── Route table ───────────────────────────────────────────────────────────────
 // [HTTP method, URL pattern, requiresAuth, handler]
 
@@ -368,6 +428,12 @@ const ROUTES = [
   ['POST',   '/api/projects/:id/signatures',             false, saveSignatureHandler],
   ['DELETE', '/api/projects/:id/signatures',             true,  clearSignaturesHandler],
   ['DELETE', '/api/projects/:id/signatures/:signId',     true,  clearOneSignatureHandler],
+
+  // Project videos
+  ['GET',    '/api/projects/:id/videos',                        false, listProjectVideosHandler],
+  ['POST',   '/api/projects/:id/videos',                        true,  uploadProjectVideoHandler],
+  ['DELETE', '/api/projects/:id/videos/:videoId',               true,  deleteProjectVideoHandler],
+  ['PUT',    '/api/projects/:id/videos/:videoId/signatory',     true,  updateProjectVideoSignatoryHandler],
 
   // Media library
   ['GET',    '/api/media',                               true,  listMediaHandler],
