@@ -40,19 +40,17 @@
 
   async function restoreNavState() {
     // URL param 우선 확인
-    const urlProjectId = new URLSearchParams(window.location.search).get('p');
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlProjectId = urlParams.get('p');
+    const urlTab = urlParams.get('tab');
     if (urlProjectId) {
       const p = projects.find(pr => pr.id === urlProjectId);
       if (p) {
-        await openProject(p);
-        // sessionStorage에 탭 정보가 있으면 복원
-        const raw = sessionStorage.getItem(SS_STATE);
-        if (raw) {
-          try {
-            const { tab } = JSON.parse(raw);
-            if (tab && tab !== 'slides') await changeTab(tab);
-          } catch {}
-        }
+        await openProject(p, { replace: true });
+        const tab = urlTab || sessionStorage.getItem(SS_STATE) && (() => {
+          try { return JSON.parse(sessionStorage.getItem(SS_STATE)).tab; } catch { return null; }
+        })();
+        if (tab && tab !== 'slides') await changeTab(tab, { replace: true });
         return;
       }
     }
@@ -64,8 +62,8 @@
       if (projectId) {
         const p = projects.find(pr => pr.id === projectId);
         if (p) {
-          await openProject(p);
-          if (tab && tab !== 'slides') await changeTab(tab);
+          await openProject(p, { replace: true });
+          if (tab && tab !== 'slides') await changeTab(tab, { replace: true });
         }
       }
     } catch {}
@@ -88,7 +86,38 @@
       sessionStorage.removeItem(SS_TOKEN);
       sessionStorage.removeItem(SS_STATE);
     }
+    // popstate 핸들러 — 브라우저 뒤로/앞으로 가기
+    function handlePopState(e) {
+      isPoppingState = true;
+      const state = e.state;
+      if (!state || !state.projectId) {
+        // 홈으로 복귀
+        selectedProject = null;
+        editSig = null;
+        showGuide = false;
+        saveNavState();
+      } else {
+        // 프로젝트 + 탭 복원
+        const p = projects.find(pr => pr.id === state.projectId);
+        if (p) {
+          selectedProject = p;
+          editSig = null;
+          showGuide = false;
+          sidebarOpen = false;
+          loadProject(p.id);
+          const tab = state.tab || 'slides';
+          changeTab(tab, { replace: true });
+        }
+      }
+      isPoppingState = false;
+    }
+    window.addEventListener('popstate', handlePopState);
+
     authChecking = false;
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
   });
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -294,10 +323,36 @@
   let startPct   = null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  function clearUrlParam() {
+  // ── History 관리 ───────────────────────────────────────────────────────────
+  // popstate 처리 중 pushState 방지용 플래그
+  let isPoppingState = false;
+
+  function buildUrl(projectId, tab) {
     const url = new URL(window.location);
-    url.searchParams.delete('p');
-    history.replaceState(null, '', url);
+    if (projectId) {
+      url.searchParams.set('p', projectId);
+      if (tab && tab !== 'slides') url.searchParams.set('tab', tab);
+      else url.searchParams.delete('tab');
+    } else {
+      url.searchParams.delete('p');
+      url.searchParams.delete('tab');
+    }
+    return url.toString();
+  }
+
+  function pushNav(projectId, tab) {
+    if (isPoppingState) return;
+    const state = { projectId: projectId ?? null, tab: tab ?? null };
+    history.pushState(state, '', buildUrl(projectId, tab));
+  }
+
+  function replaceNav(projectId, tab) {
+    const state = { projectId: projectId ?? null, tab: tab ?? null };
+    history.replaceState(state, '', buildUrl(projectId, tab));
+  }
+
+  function clearUrlParam() {
+    pushNav(null, null);
   }
   function flash(m, e) { msg = m || ''; err = e || ''; setTimeout(() => { msg = ''; err = ''; }, 3000); }
   function sorted(slides) { return [...(slides || [])].sort((a, b) => a.order - b.order); }
@@ -431,17 +486,15 @@
     loading = false;
   }
 
-  async function openProject(p) {
+  async function openProject(p, { replace = false } = {}) {
     selectedProject = p;
     activeTab = 'slides';
     editSig = null;
     sidebarOpen = false;
     showGuide = false;
     await loadProject(p.id);
-    // URL에 프로젝트 ID 반영
-    const url = new URL(window.location);
-    url.searchParams.set('p', p.id);
-    history.replaceState(null, '', url);
+    if (replace) replaceNav(p.id, 'slides');
+    else pushNav(p.id, 'slides');
     saveNavState();
   }
 
@@ -858,17 +911,21 @@
   }
 
   // ── Tab change ─────────────────────────────────────────────────────────────
-  async function changeTab(tab) {
+  async function changeTab(tab, { replace = false } = {}) {
     activeTab = tab;
     editSig = null;
     if (tab === 'signatures') await loadSignatures();
     if (tab === 'connections') {
       await Promise.all([loadConnStatus(), loadSignatures()]);
-      remoteQr = '';  // 프로젝트 변경 시 QR 초기화
+      remoteQr = '';
       signQr = '';
       await Promise.all([loadRemoteQr(), loadSignQr()]);
     }
     if (tab === 'settings') await loadProjectPin();
+    if (selectedProject) {
+      if (replace) replaceNav(selectedProject.id, tab);
+      else pushNav(selectedProject.id, tab);
+    }
     saveNavState();
   }
 
