@@ -1074,9 +1074,11 @@
   let editSignEffect = $state(null);
   let previewMode = $state(null); // null | 'ambient' | 'pen' | 'full'
   let previewCanvas = $state(null);
+  let previewStrokeCanvas = $state(null); // pen stroke overlay
   let previewSealEl = $state(null);
   let previewEngine = null;
   let previewStopTimer = null;
+  let previewStrokeRaf = null;
 
   function getDefaultSignEffect() {
     return {
@@ -1151,19 +1153,89 @@
     }
 
     if (mode === 'pen' || mode === 'full') {
-      if (se.penParticle) {
-        let i = 0;
-        const steps = 60;
-        const iv = setInterval(() => {
-          if (i >= steps || !previewEngine) { clearInterval(iv); return; }
-          const t  = i / steps;
-          // simulate "박상헌" stroke shape
-          const x = w * 0.15 + t * w * 0.70;
-          const y = h * 0.55 + Math.sin(t * Math.PI * 3) * h * 0.18;
-          previewEngine.emit(x, y, se);
-          i++;
-        }, 40);
+      // Stroke overlay canvas
+      const sc = previewStrokeCanvas;
+      if (sc) {
+        sc.width  = w;
+        sc.height = h;
       }
+      const sctx = sc?.getContext('2d') ?? null;
+
+      // path: two looping strokes (simulate actual signature)
+      const PATHS = [
+        // 첫 번째 획 — 왼→오 물결
+        Array.from({ length: 55 }, (_, k) => {
+          const t = k / 54;
+          return { x: w * 0.12 + t * w * 0.76, y: h * 0.42 + Math.sin(t * Math.PI * 3.5) * h * 0.22 };
+        }),
+        // 두 번째 획 — 다른 리듬
+        Array.from({ length: 40 }, (_, k) => {
+          const t = k / 39;
+          return { x: w * 0.18 + t * w * 0.64, y: h * 0.62 - Math.sin(t * Math.PI * 2.5 + 0.5) * h * 0.15 };
+        }),
+      ];
+
+      const color = se.penColor || '#c9a84c';
+      let pathIdx = 0;
+      let ptIdx   = 0;
+      let drawnPts = []; // points drawn so far in current path
+
+      function animateStroke() {
+        const path = PATHS[pathIdx];
+        if (!path || ptIdx >= path.length) {
+          // hold a moment then clear & next path
+          previewStrokeRaf = setTimeout(() => {
+            if (sctx) sctx.clearRect(0, 0, w, h);
+            drawnPts = [];
+            ptIdx = 0;
+            pathIdx = (pathIdx + 1) % PATHS.length;
+            previewStrokeRaf = requestAnimationFrame(animateStroke);
+          }, 700);
+          return;
+        }
+
+        const pt = path[ptIdx];
+        drawnPts.push(pt);
+        ptIdx++;
+
+        // emit pen particles
+        if (se.penParticle && previewEngine) previewEngine.emit(pt.x, pt.y, se);
+
+        // draw stroke so far
+        if (sctx && drawnPts.length >= 2) {
+          sctx.clearRect(0, 0, w, h);
+          sctx.save();
+          sctx.strokeStyle = color;
+          sctx.shadowColor = color;
+          sctx.shadowBlur  = 18;
+          sctx.lineWidth   = 8;
+          sctx.lineCap     = 'round';
+          sctx.lineJoin    = 'round';
+          sctx.beginPath();
+          sctx.moveTo(drawnPts[0].x, drawnPts[0].y);
+          for (let k = 1; k < drawnPts.length - 1; k++) {
+            const mx = (drawnPts[k].x + drawnPts[k + 1].x) / 2;
+            const my = (drawnPts[k].y + drawnPts[k + 1].y) / 2;
+            sctx.quadraticCurveTo(drawnPts[k].x, drawnPts[k].y, mx, my);
+          }
+          const last = drawnPts[drawnPts.length - 1];
+          sctx.lineTo(last.x, last.y);
+          sctx.stroke();
+          // bright core
+          sctx.shadowBlur = 6;
+          sctx.strokeStyle = '#fff8e0';
+          sctx.lineWidth   = 2.5;
+          sctx.globalAlpha = 0.55;
+          sctx.stroke();
+          sctx.restore();
+        }
+
+        previewStrokeRaf = setTimeout(() => {
+          previewStrokeRaf = requestAnimationFrame(animateStroke);
+        }, 28);
+      }
+
+      previewStrokeRaf = requestAnimationFrame(animateStroke);
     }
 
     if (mode === 'full' && se.sealEffect) {
@@ -1175,13 +1247,22 @@
       }, 2800);
     }
 
-    const timeout = mode === 'ambient' ? 8000 : mode === 'pen' ? 4000 : 7000;
+    const timeout = mode === 'ambient' ? 9000 : mode === 'pen' ? 6000 : 8000;
     previewStopTimer = setTimeout(() => stopPreview(), timeout);
   }
 
   function stopPreview() {
     clearTimeout(previewStopTimer);
+    if (previewStrokeRaf) {
+      clearTimeout(previewStrokeRaf);
+      cancelAnimationFrame(previewStrokeRaf);
+      previewStrokeRaf = null;
+    }
     if (previewEngine) { previewEngine.destroy(); previewEngine = null; }
+    if (previewStrokeCanvas) {
+      const sctx = previewStrokeCanvas.getContext('2d');
+      sctx?.clearRect(0, 0, previewStrokeCanvas.width, previewStrokeCanvas.height);
+    }
     previewMode = null;
   }
 
@@ -2479,6 +2560,10 @@
                         {/if}
                         <canvas bind:this={previewCanvas} width="800" height="260"
                           style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+                        {#if previewMode === 'pen' || previewMode === 'full'}
+                          <canvas bind:this={previewStrokeCanvas}
+                            style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
+                        {/if}
                         <div style="position:absolute;bottom:8px;left:12px;font-size:11px;color:rgba(255,255,255,.3)">
                           {previewMode === 'ambient' ? '배경 파티클 미리보기' : previewMode === 'pen' ? '펜 파티클 미리보기' : '전체 효과 미리보기'}
                         </div>
