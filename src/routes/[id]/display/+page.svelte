@@ -31,8 +31,9 @@
   let particleCanvas = $state(null);
   let slideWrapperEl = $state(null);
   let bgmPlaying    = $state(false);
-  let playingVideo  = $state(null); // blob URL for fullscreen video overlay
-  let videoBlobUrls = {};          // signId → blob URL cache
+  let playingVideo   = $state(null); // blob URL for fullscreen video overlay
+  let frozenFrames   = $state({});   // slideIndex → JPEG data URL (마지막 프레임 스냅샷)
+  let videoBlobUrls  = {};           // signId → blob URL cache
 
   // slide transition
   let transitionClass = $state('');
@@ -670,6 +671,22 @@
       clearCanvas(msg.signId);
     }));
 
+    // 관리자 서명 초기화 → frozenFrames + 캔버스 클리어
+    unsubs.push(wsStore.on('signatures_cleared', (msg) => {
+      if (msg.signId === null) {
+        // 전체 초기화
+        frozenFrames = {};
+        playingVideo = null;
+        for (const signId of Object.keys(canvasRefs)) clearCanvas(signId);
+      } else {
+        // 개별 초기화
+        const { [msg.signId]: _removed, ...rest } = frozenFrames;
+        frozenFrames = rest;
+        if (playingVideo) playingVideo = null;
+        clearCanvas(msg.signId);
+      }
+    }));
+
     unsubs.push(wsStore.on('remote_slide', (msg) => {
       if (msg.direction === 'next') goToSlide(currentSlide + 1);
       else if (msg.direction === 'prev') goToSlide(currentSlide - 1);
@@ -796,9 +813,28 @@
       <!-- svelte-ignore a11y_media_has_caption -->
       <div class="video-overlay">
         <video src={playingVideo} autoplay
-          onended={() => { if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
+          onended={(e) => {
+            // 마지막 프레임 스냅샷 저장 → 슬라이드 복귀 시 재표시
+            try {
+              const v = e.currentTarget;
+              const snap = document.createElement('canvas');
+              snap.width  = v.videoWidth  || 1920;
+              snap.height = v.videoHeight || 1080;
+              snap.getContext('2d').drawImage(v, 0, 0);
+              frozenFrames = { ...frozenFrames, [currentSlide]: snap.toDataURL('image/jpeg', 0.92) };
+            } catch {}
+            playingVideo = null;
+            if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1);
+          }}
           onerror={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
           style="width:100%;height:100%;object-fit:fill"></video>
+      </div>
+    {/if}
+
+    <!-- 서명 완료 영상 마지막 프레임 고정 (슬라이드 복귀 시에도 유지) -->
+    {#if !playingVideo && frozenFrames[currentSlide]}
+      <div class="video-overlay">
+        <img src={frozenFrames[currentSlide]} alt="" style="width:100%;height:100%;object-fit:fill" />
       </div>
     {/if}
 
