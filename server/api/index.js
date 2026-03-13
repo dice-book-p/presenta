@@ -23,8 +23,15 @@ import {
 } from '../ws/connections.js';
 import {
   uploadSlideImage, deleteSlideImage, deleteProjectImages,
+  uploadMediaFile, deleteMediaFile,
 } from '../infra/supabase.js';
-import { MAX_SLIDE_BYTES } from '../config.js';
+import {
+  getMediaItems, getMediaItem, addMediaItem, deleteMediaItem,
+} from '../store/media.js';
+import {
+  MAX_SLIDE_BYTES, MAX_AUDIO_BYTES, MAX_VIDEO_BYTES,
+  ALLOWED_AUDIO_TYPES, ALLOWED_VIDEO_TYPES,
+} from '../config.js';
 import { checkAuth, json, readBody, match, unauth, notFound } from './middleware.js';
 
 // ── Active projects ───────────────────────────────────────────────────────────
@@ -255,6 +262,76 @@ async function disconnectHandler({ req, res, params }) {
   json(res, 200, { ok: true });
 }
 
+// ── Media ─────────────────────────────────────────────────────────────────
+
+async function listMediaHandler({ res, url }) {
+  const typeFilter = url.searchParams.get('type') || null;
+  json(res, 200, getMediaItems(typeFilter));
+}
+
+async function uploadMediaHandler({ req, res }) {
+  let uploaded = null;
+  let tooLarge = false;
+
+  await new Promise((resolve) => {
+    const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_VIDEO_BYTES }, defParamCharset: 'utf8' });
+    busboy.on('file', (_field, stream, info) => {
+      const chunks = [];
+      stream.on('data', chunk => chunks.push(chunk));
+      stream.on('limit', () => { tooLarge = true; stream.resume(); });
+      stream.on('end', () => {
+        if (!tooLarge) {
+          uploaded = { buffer: Buffer.concat(chunks), filename: info.filename, contentType: info.mimeType };
+        }
+      });
+    });
+    busboy.on('close', resolve);
+    busboy.on('error', resolve);
+    req.pipe(busboy);
+  });
+
+  if (!uploaded) { json(res, 400, { error: '파일 없음' }); return; }
+
+  const isAudio = ALLOWED_AUDIO_TYPES.has(uploaded.contentType);
+  const isVideo = ALLOWED_VIDEO_TYPES.has(uploaded.contentType);
+
+  if (!isAudio && !isVideo) {
+    json(res, 400, { error: '지원하지 않는 파일 형식입니다' });
+    return;
+  }
+
+  const maxBytes = isAudio ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
+  if (tooLarge || uploaded.buffer.length > maxBytes) {
+    json(res, 413, { error: `파일 크기 초과 (최대 ${isAudio ? '5' : '20'}MB)` });
+    return;
+  }
+
+  try {
+    const { filename, url } = await uploadMediaFile(uploaded.filename, uploaded.buffer, uploaded.contentType);
+    const item = addMediaItem({
+      type: isAudio ? 'audio' : 'video',
+      filename,
+      originalFilename: uploaded.filename,
+      url,
+      mimeType: uploaded.contentType,
+      size: uploaded.buffer.length,
+    });
+    json(res, 201, item);
+  } catch (e) {
+    json(res, 500, { error: e.message });
+  }
+}
+
+async function deleteMediaHandler({ res, params }) {
+  const item = getMediaItem(params.mediaId);
+  if (!item) { notFound(res); return; }
+  deleteMediaFile(item.filename).catch(e =>
+    console.error('[api] deleteMediaFile:', e.message)
+  );
+  deleteMediaItem(params.mediaId);
+  json(res, 200, { ok: true });
+}
+
 // ── Route table ───────────────────────────────────────────────────────────────
 // [HTTP method, URL pattern, requiresAuth, handler]
 
@@ -291,6 +368,11 @@ const ROUTES = [
   ['POST',   '/api/projects/:id/signatures',             false, saveSignatureHandler],
   ['DELETE', '/api/projects/:id/signatures',             true,  clearSignaturesHandler],
   ['DELETE', '/api/projects/:id/signatures/:signId',     true,  clearOneSignatureHandler],
+
+  // Media library
+  ['GET',    '/api/media',                               true,  listMediaHandler],
+  ['POST',   '/api/media',                               true,  uploadMediaHandler],
+  ['DELETE', '/api/media/:mediaId',                      true,  deleteMediaHandler],
 
   // Auth ping (PIN 검증용)
   ['GET',    '/api/me',                                  true,  ({ res }) => json(res, 200, { ok: true })],

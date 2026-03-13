@@ -53,6 +53,23 @@ export async function deleteProjectImages(projectId) {
   if (existsSync(dir)) await rm(dir, { recursive: true, force: true }).catch(() => {});
 }
 
+// ── Media files ──────────────────────────────────────────────────────────
+
+export async function uploadMediaFile(originalFilename, buffer, contentType) {
+  const ext = originalFilename.split('.').pop().toLowerCase() || 'bin';
+  const filename = `${randomUUID()}.${ext}`;
+  const dir = join(UPLOAD_DIR, 'media');
+  await ensureDir(dir);
+  await writeFile(join(dir, filename), buffer);
+  const url = `/media/${filename}`;
+  return { filename, url };
+}
+
+export async function deleteMediaFile(filename) {
+  const filepath = join(UPLOAD_DIR, 'media', filename);
+  if (existsSync(filepath)) await unlink(filepath).catch(() => {});
+}
+
 // ── Data files ────────────────────────────────────────────────────────────────
 
 export async function loadData(filename) {

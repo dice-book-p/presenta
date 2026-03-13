@@ -55,3 +55,7 @@ CREATE TABLE IF NOT EXISTS signatures (
 );
 
 CREATE INDEX IF NOT EXISTS idx_signatures_project ON signatures(project_id);
+
+-- ── 마이그레이션: 서명 연출 효과 ──────────────────────────────────────────────
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS sign_effect JSONB DEFAULT NULL;
+ALTER TABLE signatories ADD COLUMN IF NOT EXISTS video_id UUID DEFAULT NULL;

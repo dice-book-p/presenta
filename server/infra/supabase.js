@@ -21,8 +21,10 @@ if (process.env.SUPABASE_URL) {
   console.log('[storage] using local filesystem (data/ & uploads/)');
 }
 
-export const uploadSlideImage   = adapter.uploadSlideImage;
-export const deleteSlideImage   = adapter.deleteSlideImage;
+export const uploadSlideImage    = adapter.uploadSlideImage;
+export const deleteSlideImage    = adapter.deleteSlideImage;
 export const deleteProjectImages = adapter.deleteProjectImages;
-export const loadData           = adapter.loadData;
-export const saveData           = adapter.saveData;
+export const uploadMediaFile     = adapter.uploadMediaFile;
+export const deleteMediaFile     = adapter.deleteMediaFile;
+export const loadData            = adapter.loadData;
+export const saveData            = adapter.saveData;

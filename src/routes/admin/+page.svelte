@@ -492,6 +492,7 @@
     editSig = null;
     sidebarOpen = false;
     showGuide = false;
+    showMediaTab = false;
     await loadProject(p.id);
     if (replace) replaceNav(p.id, 'slides');
     else pushNav(p.id, 'slides');
@@ -921,7 +922,7 @@
       signQr = '';
       await Promise.all([loadRemoteQr(), loadSignQr()]);
     }
-    if (tab === 'settings') await loadProjectPin();
+    if (tab === 'settings') { await loadProjectPin(); await loadMediaItems(); }
     if (selectedProject) {
       if (replace) replaceNav(selectedProject.id, tab);
       else pushNav(selectedProject.id, tab);
@@ -997,6 +998,114 @@
     loading = false;
   }
 
+  // ── Media library ────────────────────────────────────────────────────────
+  let showMediaTab = $state(false);
+  let mediaItems = $state([]);
+  let mediaFilter = $state('all');
+  let mediaUploading = $state(false);
+
+  async function loadMediaItems() {
+    try {
+      const r = await fetch(`${API_BASE}/api/media`, { headers: authHeaders() });
+      if (r.ok) mediaItems = await r.json();
+    } catch {}
+  }
+
+  async function uploadMediaFile(file) {
+    mediaUploading = true;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`${API_BASE}/api/media`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: fd,
+      });
+      if (r.ok) {
+        const item = await r.json();
+        mediaItems = [...mediaItems, item];
+        flash('미디어가 업로드되었습니다.');
+      } else {
+        const body = await r.json().catch(() => ({}));
+        flash('', body.error || '업로드 실패');
+      }
+    } catch { flash('', '업로드 중 오류 발생'); }
+    mediaUploading = false;
+  }
+
+  async function deleteMedia(id) {
+    if (!confirm('이 미디어를 삭제하시겠습니까?')) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/media/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (r.ok) {
+        mediaItems = mediaItems.filter(m => m.id !== id);
+        flash('삭제되었습니다.');
+      }
+    } catch {}
+  }
+
+  function handleMediaDrop(e) {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (files?.length) uploadMediaFile(files[0]);
+  }
+
+  const filteredMedia = $derived(
+    mediaFilter === 'all' ? mediaItems : mediaItems.filter(m => m.type === mediaFilter)
+  );
+
+  let mediaPreviewId = $state(null);
+
+  // ── Sign effect settings ─────────────────────────────────────────────────
+  const THEME_PRESETS = {
+    none:     { label: '선택 안함' },
+    gold:     { label: '골드 클래식',   color: '#c9a84c' },
+    silver:   { label: '실버 엘레강스', color: '#c0c0c0' },
+    rosegold: { label: '로즈골드',      color: '#b76e79' },
+    custom:   { label: '사용자 정의' },
+  };
+
+  async function saveSignEffect(signEffect) {
+    if (!selectedProject) return;
+    const pid = selectedProject.id;
+    try {
+      const r = await apiPut(`/api/projects/${pid}`, { signEffect });
+      if (r.ok) {
+        selectedProject = { ...selectedProject, signEffect };
+        flash('서명 연출 설정이 저장되었습니다.');
+      } else flash('', '설정 저장 실패');
+    } catch { flash('', '설정 저장 중 오류 발생'); }
+  }
+
+  function updateSignEffect(key, value) {
+    const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
+    se[key] = value;
+    saveSignEffect(se);
+  }
+
+  function setSignEffectTheme(theme) {
+    const se = { ...(selectedProject?.signEffect ?? getDefaultSignEffect()) };
+    se.theme = theme;
+    saveSignEffect(se);
+  }
+
+  function getDefaultSignEffect() {
+    return {
+      theme: 'none', mode: 'realtime',
+      bgmId: null, bgmMode: 'continuous',
+      completeSoundId: null, completeSoundVolume: 80,
+      penParticle: true, penColor: '#c9a84c', penSize: 'medium', penDensity: 'normal',
+      ambientParticle: true, ambientColor: '#c9a84c', ambientDensity: 'low',
+      sealEffect: true, sealColor: '#c9a84c', sealDuration: 6,
+      transition: 'diamond', autoAdvance: false,
+    };
+  }
+
+  const currentSignEffect = $derived(selectedProject?.signEffect ?? getDefaultSignEffect());
+
   const NAV_ITEMS = [
     { id: 'slides',       label: '슬라이드' },
     { id: 'signatories',  label: '서명자' },
@@ -1065,11 +1174,22 @@
           {/if}
         </div>
 
+        <!-- Media library (global) -->
+        <div class="sidebar-group">
+          <div class="sidebar-group-header">
+            <span class="sidebar-group-label">라이브러리</span>
+          </div>
+          <button class="project-list-item" class:selected={showMediaTab}
+            onclick={() => { selectedProject = null; editSig = null; showGuide = false; showMediaTab = true; clearUrlParam(); loadMediaItems(); }}>
+            <span class="project-list-name">미디어</span>
+          </button>
+        </div>
+
         <!-- Guide link -->
         <div class="sidebar-spacer"></div>
         <div class="sidebar-bottom">
           <button class="sidebar-guide-btn" class:active={showGuide}
-            onclick={() => { selectedProject = null; editSig = null; showGuide = true; clearUrlParam(); }}>
+            onclick={() => { selectedProject = null; editSig = null; showGuide = true; showMediaTab = false; clearUrlParam(); }}>
             📖 사용 가이드
           </button>
         </div>
@@ -1315,6 +1435,63 @@
                 <li>프로젝트를 복제하면 슬라이드 이미지는 공유되며 서명자는 새 ID로 복제됩니다.</li>
               </ul>
             </div>
+          </div>
+
+        <!-- ── Media library ── -->
+        {:else if showMediaTab && !selectedProject}
+          <div class="content-section">
+            <div class="section-header">
+              <h2 class="section-title">미디어 라이브러리</h2>
+            </div>
+
+            <!-- 업로드 -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="media-upload-zone" ondragover={e => e.preventDefault()} ondrop={handleMediaDrop}>
+              <p class="helper-text">음원(MP3, WAV, OGG) 또는 영상(MP4, WebM)을 드래그하거나 클릭하여 업로드</p>
+              <input type="file" accept="audio/*,video/*" style="display:none" id="media-file-input"
+                onchange={e => { if (e.target.files[0]) uploadMediaFile(e.target.files[0]); e.target.value = ''; }} />
+              <button class="btn-gold btn-sm" disabled={mediaUploading}
+                onclick={() => document.getElementById('media-file-input').click()}>
+                {mediaUploading ? '업로드 중...' : '파일 선택'}
+              </button>
+            </div>
+
+            <!-- 필터 -->
+            <div class="media-filter">
+              <button class="filter-btn" class:active={mediaFilter === 'all'} onclick={() => mediaFilter = 'all'}>전체</button>
+              <button class="filter-btn" class:active={mediaFilter === 'audio'} onclick={() => mediaFilter = 'audio'}>음원</button>
+              <button class="filter-btn" class:active={mediaFilter === 'video'} onclick={() => mediaFilter = 'video'}>영상</button>
+            </div>
+
+            <!-- 목록 -->
+            {#if filteredMedia.length === 0}
+              <p class="helper-text" style="padding:20px">등록된 미디어가 없습니다.</p>
+            {:else}
+              <div class="media-list">
+                {#each filteredMedia as item (item.id)}
+                  <div class="media-item">
+                    <div class="media-item-info">
+                      <span class="media-type-badge">{item.type === 'audio' ? '음원' : '영상'}</span>
+                      <span class="media-item-name">{item.originalFilename}</span>
+                      <span class="media-item-size">{(item.size / 1024 / 1024).toFixed(1)}MB</span>
+                    </div>
+                    <div class="media-item-actions">
+                      {#if item.type === 'audio'}
+                        {#if mediaPreviewId === item.id}
+                          <button class="btn-ghost btn-xs" onclick={() => mediaPreviewId = null}>정지</button>
+                        {:else}
+                          <button class="btn-ghost btn-xs" onclick={() => mediaPreviewId = item.id}>미리듣기</button>
+                        {/if}
+                      {/if}
+                      <button class="btn-danger btn-xs" onclick={() => deleteMedia(item.id)}>삭제</button>
+                    </div>
+                    {#if mediaPreviewId === item.id && item.type === 'audio'}
+                      <audio src={item.url} autoplay controls style="width:100%;margin-top:8px;height:32px" onended={() => mediaPreviewId = null}></audio>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
 
         <!-- ── Projects home (no project selected) ── -->
@@ -1891,6 +2068,188 @@
               </p>
             </div>
 
+            <!-- ── 서명 연출 설정 ── -->
+            <div class="form-card">
+              <div class="form-section-label">서명 연출</div>
+              <p class="helper-text" style="margin-top:-8px">
+                서명 시 오디오/시각 연출 효과를 설정합니다. 테마를 선택하면 전체 효과가 한번에 적용됩니다.
+              </p>
+
+              <!-- 테마 선택 -->
+              <div class="form-group" style="margin-top:12px">
+                <label class="field-label">테마</label>
+                <select class="text-input" value={currentSignEffect.theme} onchange={e => setSignEffectTheme(e.target.value)}>
+                  {#each Object.entries(THEME_PRESETS) as [key, preset]}
+                    <option value={key}>{preset.label}</option>
+                  {/each}
+                </select>
+                {#if currentSignEffect.theme !== 'none' && currentSignEffect.theme !== 'custom'}
+                  <div class="theme-swatch" style="background:{THEME_PRESETS[currentSignEffect.theme]?.color};width:24px;height:24px;border-radius:50%;display:inline-block;margin-top:6px;box-shadow:0 0 8px {THEME_PRESETS[currentSignEffect.theme]?.color}"></div>
+                {/if}
+              </div>
+
+              <!-- 사용자 정의 세부 옵션 -->
+              {#if currentSignEffect.theme === 'custom'}
+                <div class="custom-effects-panel" style="margin-top:12px;padding:16px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
+                  <div class="form-section-label" style="font-size:12px">펜 파티클</div>
+                  <label class="toggle-row">
+                    <span class="toggle-label"><strong>펜 파티클</strong></span>
+                    <button class="toggle-switch" class:on={currentSignEffect.penParticle}
+                      onclick={() => updateSignEffect('penParticle', !currentSignEffect.penParticle)}>
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </label>
+                  {#if currentSignEffect.penParticle}
+                    <div class="form-row-2" style="margin-top:8px">
+                      <div class="form-group">
+                        <label class="field-label">색상</label>
+                        <input type="color" value={currentSignEffect.penColor} onchange={e => updateSignEffect('penColor', e.target.value)} />
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label">크기</label>
+                        <select class="text-input" value={currentSignEffect.penSize} onchange={e => updateSignEffect('penSize', e.target.value)}>
+                          <option value="small">소</option><option value="medium">중</option><option value="large">대</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label">밀도</label>
+                        <select class="text-input" value={currentSignEffect.penDensity} onchange={e => updateSignEffect('penDensity', e.target.value)}>
+                          <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option>
+                        </select>
+                      </div>
+                    </div>
+                  {/if}
+
+                  <div class="form-section-label" style="font-size:12px;margin-top:12px">배경 파티클</div>
+                  <label class="toggle-row">
+                    <span class="toggle-label"><strong>배경 파티클</strong></span>
+                    <button class="toggle-switch" class:on={currentSignEffect.ambientParticle}
+                      onclick={() => updateSignEffect('ambientParticle', !currentSignEffect.ambientParticle)}>
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </label>
+                  {#if currentSignEffect.ambientParticle}
+                    <div class="form-row-2" style="margin-top:8px">
+                      <div class="form-group">
+                        <label class="field-label">색상</label>
+                        <input type="color" value={currentSignEffect.ambientColor} onchange={e => updateSignEffect('ambientColor', e.target.value)} />
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label">밀도</label>
+                        <select class="text-input" value={currentSignEffect.ambientDensity} onchange={e => updateSignEffect('ambientDensity', e.target.value)}>
+                          <option value="low">낮음</option><option value="normal">보통</option><option value="high">높음</option>
+                        </select>
+                      </div>
+                    </div>
+                  {/if}
+
+                  <div class="form-section-label" style="font-size:12px;margin-top:12px">서명완료 효과</div>
+                  <label class="toggle-row">
+                    <span class="toggle-label"><strong>Seal 이펙트</strong></span>
+                    <button class="toggle-switch" class:on={currentSignEffect.sealEffect}
+                      onclick={() => updateSignEffect('sealEffect', !currentSignEffect.sealEffect)}>
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </label>
+                  {#if currentSignEffect.sealEffect}
+                    <div class="form-row-2" style="margin-top:8px">
+                      <div class="form-group">
+                        <label class="field-label">색상</label>
+                        <input type="color" value={currentSignEffect.sealColor} onchange={e => updateSignEffect('sealColor', e.target.value)} />
+                      </div>
+                      <div class="form-group">
+                        <label class="field-label">지속시간 ({currentSignEffect.sealDuration}초)</label>
+                        <input type="range" min="3" max="10" value={currentSignEffect.sealDuration}
+                          onchange={e => updateSignEffect('sealDuration', parseInt(e.target.value))} />
+                      </div>
+                    </div>
+                  {/if}
+
+                  <div class="form-group" style="margin-top:12px">
+                    <label class="field-label">슬라이드 전환</label>
+                    <select class="text-input" value={currentSignEffect.transition} onchange={e => updateSignEffect('transition', e.target.value)}>
+                      <option value="none">없음</option>
+                      <option value="fade">페이드</option>
+                      <option value="slide">슬라이드</option>
+                      <option value="zoom">줌</option>
+                      <option value="diamond">다이아몬드</option>
+                    </select>
+                  </div>
+                </div>
+              {/if}
+
+              <!-- 오디오 (항상 표시) -->
+              {#if currentSignEffect.theme !== 'none'}
+                <div style="margin-top:16px">
+                  <div class="form-section-label" style="font-size:12px">오디오</div>
+                  <div class="form-row-2">
+                    <div class="form-group">
+                      <label class="field-label">BGM</label>
+                      <select class="text-input" value={currentSignEffect.bgmId ?? ''}
+                        onchange={e => updateSignEffect('bgmId', e.target.value || null)}>
+                        <option value="">없음</option>
+                        {#each mediaItems.filter(m => m.type === 'audio') as m}
+                          <option value={m.id}>{m.originalFilename}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label">재생 모드</label>
+                      <select class="text-input" value={currentSignEffect.bgmMode}
+                        onchange={e => updateSignEffect('bgmMode', e.target.value)}>
+                        <option value="continuous">구간 연속</option>
+                        <option value="per-sign">서명별</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row-2" style="margin-top:8px">
+                    <div class="form-group">
+                      <label class="field-label">효과음</label>
+                      <select class="text-input" value={currentSignEffect.completeSoundId ?? ''}
+                        onchange={e => updateSignEffect('completeSoundId', e.target.value || null)}>
+                        <option value="">없음</option>
+                        {#each mediaItems.filter(m => m.type === 'audio') as m}
+                          <option value={m.id}>{m.originalFilename}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="field-label">효과음 볼륨 ({currentSignEffect.completeSoundVolume}%)</label>
+                      <input type="range" min="0" max="100" value={currentSignEffect.completeSoundVolume}
+                        onchange={e => updateSignEffect('completeSoundVolume', parseInt(e.target.value))} />
+                    </div>
+                  </div>
+                </div>
+              {/if}
+
+              <!-- 기타 -->
+              {#if currentSignEffect.theme !== 'none'}
+                <div style="margin-top:16px">
+                  <div class="form-section-label" style="font-size:12px">기타</div>
+                  <div class="form-row-2">
+                    <div class="form-group">
+                      <label class="field-label">서명 모드</label>
+                      <select class="text-input" value={currentSignEffect.mode}
+                        onchange={e => updateSignEffect('mode', e.target.value)}>
+                        <option value="realtime">실시간</option>
+                        <option value="video">영상</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label class="toggle-row" style="margin-top:8px">
+                    <span class="toggle-label">
+                      <strong>자동 이동</strong>
+                      <span class="toggle-desc">서명 완료 후 자동으로 다음 슬라이드로 이동</span>
+                    </span>
+                    <button class="toggle-switch" class:on={currentSignEffect.autoAdvance}
+                      onclick={() => updateSignEffect('autoAdvance', !currentSignEffect.autoAdvance)}>
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </label>
+                </div>
+              {/if}
+            </div>
+
             <div class="form-card">
               <div class="form-section-label">프로젝트 관리</div>
               <div class="form-footer">
@@ -2405,4 +2764,25 @@
     transition: all .15s; }
   .interval-btn:hover { border-color: rgba(201,168,76,.4); color: #c9a84c; }
   .interval-value { font-size: 15px; font-weight: 700; color: #c9a84c; min-width: 36px; text-align: center; }
+
+  /* ── Media library ── */
+  .media-upload-zone { padding: 24px; border: 2px dashed rgba(201,168,76,.2); border-radius: 12px;
+    text-align: center; margin-bottom: 16px; transition: border-color .2s; }
+  .media-upload-zone:hover { border-color: rgba(201,168,76,.4); }
+  .media-filter { display: flex; gap: 6px; margin-bottom: 12px; }
+  .filter-btn { padding: 5px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,.1);
+    background: rgba(255,255,255,.04); color: rgba(232,224,208,.6); font-size: 12px; cursor: pointer;
+    font-family: inherit; transition: all .15s; }
+  .filter-btn:hover { border-color: rgba(201,168,76,.3); color: rgba(232,224,208,.8); }
+  .filter-btn.active { background: rgba(201,168,76,.12); border-color: rgba(201,168,76,.4); color: #c9a84c; }
+  .media-list { display: flex; flex-direction: column; gap: 8px; }
+  .media-item { padding: 12px 16px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px; }
+  .media-item-info { display: flex; align-items: center; gap: 10px; }
+  .media-type-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+    background: rgba(201,168,76,.1); border: 1px solid rgba(201,168,76,.2); color: #c9a84c; }
+  .media-item-name { font-size: 13px; color: rgba(232,224,208,.85); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .media-item-size { font-size: 11px; color: rgba(232,224,208,.4); }
+  .media-item-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .btn-xs { padding: 3px 10px; font-size: 11px; }
 </style>

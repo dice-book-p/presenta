@@ -12,6 +12,11 @@ export default defineConfig({
 				target: `http://localhost:${WS_PORT}`,
 				changeOrigin: true
 			},
+			// 미디어 파일 프록시
+			'/media': {
+				target: `http://localhost:${WS_PORT}`,
+				changeOrigin: true
+			},
 			// 로컬 이미지 서빙 프록시
 			'/uploads': {
 				target: `http://localhost:${WS_PORT}`,

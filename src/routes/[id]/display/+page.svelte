@@ -5,6 +5,10 @@
   import { page } from '$app/stores';
   import { wsStore } from '$lib/stores/websocket.svelte.js';
   import { API_BASE } from '$lib/config.js';
+  import { AudioManager } from '$lib/audio-manager.js';
+  import { ParticleEngine } from '$lib/particle-engine.js';
+  import { SealEffect } from '$lib/seal-effect.js';
+  import { getThemeConfig } from '$lib/effect-themes.js';
 
   // URL 라우트에서 프로젝트 ID 추출
   const projectId = $derived($page.params.id);
@@ -16,6 +20,24 @@
   let rejectReason = $state('');
   let identified   = $state(false);
   let noProject    = $state(false);  // active project not set
+
+  // ── Effect state ────────────────────────────────────────────────────────────
+  let mounted = false;
+  let effectConfig  = $state(null);
+  let mediaUrls     = $state({});
+  let audioManager  = null;
+  let particleEngine = null;
+  let sealEffect    = null;
+  let particleCanvas = $state(null);
+  let slideWrapperEl = $state(null);
+  let bgmPlaying    = $state(false);
+  let playingVideo  = $state(null); // blob URL for fullscreen video overlay
+  let videoBlobUrls = {};          // signId → blob URL cache
+
+  // slide transition
+  let transitionClass = $state('');
+  let isTransitioning = $state(false);
+  let transitionTimers = [];
 
   // sig.id → canvas element (populated by bind:this)
   let canvasRefs   = $state({});
@@ -113,6 +135,27 @@
     const px = msg.x * canvas.width;
     const py = msg.y * canvas.height;
 
+    // Pen particle: emit at screen coordinates
+    if (effectConfig && particleEngine && msg.action === 'move') {
+      const area = getCanvasArea(sig);
+      if (area) {
+        const wrapW = window.innerWidth;
+        const wrapH = window.innerHeight;
+        const aLeft = parseFloat(area.left) / 100 * wrapW;
+        const aTop = parseFloat(area.top) / 100 * wrapH;
+        const aW = parseFloat(area.width) / 100 * wrapW;
+        const aH = parseFloat(area.height) / 100 * wrapH;
+        particleEngine.emit(aLeft + msg.x * aW, aTop + msg.y * aH, effectConfig);
+      }
+    }
+
+    // Per-sign BGM: start on first draw
+    if (effectConfig?.bgmMode === 'per-sign' && effectConfig?.bgmId && !bgmPlaying && msg.action === 'start') {
+      audioManager?.ensureResumed();
+      audioManager?.startBgm({ fadeIn: 1, loop: true });
+      bgmPlaying = true;
+    }
+
     if (msg.action === 'start') {
       ctx.beginPath();
       ctx.moveTo(px, py);
@@ -161,6 +204,21 @@
       const px = pt.x * canvas.width;
       const py = pt.y * canvas.height;
       drawSmoothPoint(ctx, drawingState[msg.signId], px, py);
+    }
+
+    // Pen particle for batch (emit on last point)
+    if (effectConfig && particleEngine && points.length) {
+      const lastPt = points[points.length - 1];
+      const area = getCanvasArea(sig);
+      if (area) {
+        const wrapW = window.innerWidth;
+        const wrapH = window.innerHeight;
+        const aLeft = parseFloat(area.left) / 100 * wrapW;
+        const aTop = parseFloat(area.top) / 100 * wrapH;
+        const aW = parseFloat(area.width) / 100 * wrapW;
+        const aH = parseFloat(area.height) / 100 * wrapH;
+        particleEngine.emit(aLeft + lastPt.x * aW, aTop + lastPt.y * aH, effectConfig);
+      }
     }
   }
 
@@ -241,13 +299,105 @@
   let slideNumBuffer = $state('');     // 숫자 입력 버퍼 (숫자+Enter 이동)
   let slideNumTimer = null;
 
-  const SS_SLIDE = 'display_slide';
-  const SS_FRESH = 'display_fresh_entry';
+  const SS_SLIDE = $derived(`display_slide_${projectId}`);
+  const SS_FRESH = $derived(`display_fresh_${projectId}`);
 
   function showBoundaryToast(msg) {
     boundaryToast = msg;
     clearTimeout(boundaryToastTimer);
     boundaryToastTimer = setTimeout(() => { boundaryToast = ''; }, 2000);
+  }
+
+  // ── Effects helpers ──────────────────────────────────────────────────────
+  function isSignSlide(slideIdx) {
+    if (!project?.signatories?.length || !sortedSlides.length) return false;
+    const slide = sortedSlides[slideIdx];
+    if (!slide) return false;
+    return project.signatories.some(s => s.slideId === slide.id) ||
+           (project.summarySlideId && slide.id === project.summarySlideId);
+  }
+
+  function getSignSlideRange() {
+    if (!project?.signatories?.length || !sortedSlides.length) return null;
+    let first = -1, last = -1;
+    for (let i = 0; i < sortedSlides.length; i++) {
+      if (isSignSlide(i)) {
+        if (first === -1) first = i;
+        last = i;
+      }
+    }
+    return first >= 0 ? { first, last } : null;
+  }
+
+  function isInSignRange(idx) {
+    const range = getSignSlideRange();
+    if (!range) return false;
+    return idx >= range.first && idx <= range.last;
+  }
+
+  function initEffects(proj, urls) {
+    effectConfig = getThemeConfig(proj?.signEffect);
+    mediaUrls = urls || {};
+    if (!effectConfig) return;
+
+    // Audio
+    audioManager = new AudioManager();
+    if (mediaUrls.bgmUrl) audioManager.preloadBgm(mediaUrls.bgmUrl);
+    if (mediaUrls.completeSoundUrl) audioManager.preloadComplete(mediaUrls.completeSoundUrl);
+
+    // Particles
+    if (particleCanvas) {
+      particleEngine = new ParticleEngine(particleCanvas);
+      particleEngine.resize(window.innerWidth, window.innerHeight);
+    }
+
+    // Seal
+    sealEffect = new SealEffect();
+
+    // Preload signatory videos
+    if (effectConfig.mode === 'video' && mediaUrls.signatoryVideos) {
+      for (const [signId, url] of Object.entries(mediaUrls.signatoryVideos)) {
+        fetch(url).then(r => r.blob()).then(blob => {
+          videoBlobUrls[signId] = URL.createObjectURL(blob);
+        }).catch(() => {});
+      }
+    }
+  }
+
+  function cleanupEffects() {
+    if (audioManager) { audioManager.destroy(); audioManager = null; }
+    if (particleEngine) { particleEngine.destroy(); particleEngine = null; }
+    if (sealEffect) { sealEffect.stop(); sealEffect = null; }
+    for (const url of Object.values(videoBlobUrls)) {
+      URL.revokeObjectURL(url);
+    }
+    videoBlobUrls = {};
+  }
+
+  function handleBgmForSlide(newIdx, oldIdx) {
+    if (!effectConfig || !audioManager || !effectConfig.bgmId) return;
+    if (effectConfig.bgmMode !== 'continuous') return;
+
+    const wasInRange = oldIdx >= 0 && isInSignRange(oldIdx);
+    const nowInRange = isInSignRange(newIdx);
+
+    if (nowInRange && !bgmPlaying) {
+      audioManager.ensureResumed();
+      audioManager.startBgm({ fadeIn: 1.5, loop: true });
+      bgmPlaying = true;
+    } else if (!nowInRange && bgmPlaying) {
+      audioManager.stopBgm({ fadeOut: 1.5 });
+      bgmPlaying = false;
+    }
+  }
+
+  function handleAmbientForSlide(newIdx) {
+    if (!effectConfig || !particleEngine) return;
+    if (isSignSlide(newIdx)) {
+      particleEngine.startAmbient(effectConfig);
+    } else {
+      particleEngine.stopAmbient();
+    }
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -273,9 +423,33 @@
     }
 
     if (idx === currentSlide) return;
-    currentSlide = idx;
+
+    const oldIdx = currentSlide;
+    const transition = effectConfig?.transition || 'none';
+
+    if (transition !== 'none' && !isTransitioning) {
+      isTransitioning = true;
+      transitionClass = `trans-${transition}-out`;
+      const t1 = setTimeout(() => {
+        currentSlide = idx;
+        transitionClass = `trans-${transition}-in`;
+        const t2 = setTimeout(() => {
+          transitionClass = '';
+          isTransitioning = false;
+        }, transition === 'diamond' ? 800 : 500);
+        transitionTimers.push(t2);
+      }, transition === 'diamond' ? 400 : 250);
+      transitionTimers.push(t1);
+    } else {
+      currentSlide = idx;
+    }
+
     sessionStorage.setItem(SS_SLIDE, String(idx));
     wsStore.send({ type: 'slide_change', slideIndex: sortedSlides[idx].order });
+
+    // Effects on slide change
+    handleBgmForSlide(idx, oldIdx);
+    handleAmbientForSlide(idx);
   }
 
   function toggleLoop() {
@@ -362,7 +536,14 @@
   }
 
   onMount(() => {
+    mounted = true;
     window.addEventListener('keydown', handleKeyDown);
+    const handleResize = () => {
+      if (particleEngine && particleCanvas) {
+        particleEngine.resize(window.innerWidth, window.innerHeight);
+      }
+    };
+    window.addEventListener('resize', handleResize);
     wsStore.connect();
 
     const unsubs = [];
@@ -374,6 +555,8 @@
         noProject = false;
         ctxMap = {};  // reset ctx cache on project load
         applySlideshowSettings(msg.project);
+        await tick();
+        initEffects(msg.project, msg.mediaUrls);
         const saved = sessionStorage.getItem(SS_SLIDE);
         // 역할선택 페이지에서 진입 시 플래그가 설정됨 → 새 진입
         // 새로고침 시에는 플래그 없음 → 조용히 복원
@@ -428,7 +611,39 @@
 
     unsubs.push(wsStore.on('sign_done', (msg) => {
       saveSignatureToServer(msg.signId);
-      goToSlide(currentSlide + 1);
+
+      // Play complete sound
+      if (effectConfig?.completeSoundId && audioManager) {
+        audioManager.playCompleteSound(effectConfig.completeSoundVolume ?? 80);
+      }
+
+      // Per-sign BGM fadeOut
+      if (effectConfig?.bgmMode === 'per-sign' && bgmPlaying && audioManager) {
+        audioManager.stopBgm({ fadeOut: 1 });
+        bgmPlaying = false;
+      }
+
+      // Mode branching
+      if (!effectConfig || effectConfig.theme === 'none') {
+        // No effect — legacy behavior
+        goToSlide(currentSlide + 1);
+      } else if (effectConfig.mode === 'video') {
+        // Video mode
+        const blobUrl = videoBlobUrls[msg.signId];
+        if (blobUrl) {
+          playingVideo = blobUrl;
+        } else if (effectConfig.autoAdvance) {
+          goToSlide(currentSlide + 1);
+        }
+      } else if (effectConfig.sealEffect && sealEffect && slideWrapperEl) {
+        // Realtime + seal effect
+        sealEffect.play(slideWrapperEl, effectConfig, () => {
+          if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1);
+        });
+      } else {
+        // Realtime, no seal
+        if (effectConfig.autoAdvance) goToSlide(currentSlide + 1);
+      }
     }));
 
     unsubs.push(wsStore.on('sign_clear', (msg) => {
@@ -455,13 +670,17 @@
     }, 500);
 
     return () => {
+      mounted = false;
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleResize);
       clearInterval(identifyInterval);
       stopAutoPlay();
       clearTimeout(boundaryToastTimer);
       clearTimeout(controlsTimer);
       clearTimeout(slideNumTimer);
       clearTimeout(signSaveTimer);
+      transitionTimers.forEach(t => clearTimeout(t));
+      cleanupEffects();
       unsubs.forEach(fn => fn());
       wsStore.disconnect();
     };
@@ -516,8 +735,10 @@
 <!-- 슬라이드쇼 -->
 {:else}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="fullscreen slideshow" onmousemove={showControlsTemporarily}>
-    <div class="slide-wrapper">
+  <div class="fullscreen slideshow" onmousemove={showControlsTemporarily}
+    onclick={() => audioManager?.ensureResumed()}
+    onkeydown={() => audioManager?.ensureResumed()}>
+    <div class="slide-wrapper {transitionClass}" bind:this={slideWrapperEl}>
       <!-- 현재 슬라이드 이미지 -->
       {#if currentSlideObj}
         <img
@@ -526,6 +747,14 @@
           alt="슬라이드 {currentSlide + 1}"
         />
       {/if}
+
+      <!-- 파티클 overlay canvas -->
+      <canvas
+        bind:this={particleCanvas}
+        class="particle-overlay"
+        width={typeof window !== 'undefined' ? window.innerWidth : 1920}
+        height={typeof window !== 'undefined' ? window.innerHeight : 1080}
+      ></canvas>
 
       <!-- 서명 캔버스 오버레이 (항상 마운트, visibility만 토글) -->
       {#each project.signatories as sig (sig.id)}
@@ -541,6 +770,17 @@
         ></canvas>
       {/each}
     </div>
+
+    <!-- 영상 재생 오버레이 -->
+    {#if playingVideo}
+      <!-- svelte-ignore a11y_media_has_caption -->
+      <div class="video-overlay">
+        <video src={playingVideo} autoplay
+          onended={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
+          onerror={() => { playingVideo = null; if (mounted && effectConfig?.autoAdvance) goToSlide(currentSlide + 1); }}
+          style="width:100%;height:100%;object-fit:contain"></video>
+      </div>
+    {/if}
 
     <!-- 이어보기 확인 다이얼로그 -->
     {#if showResumePrompt}
@@ -765,6 +1005,66 @@
 
   .sig-canvas.visible {
     display: block;
+  }
+
+  /* ── Particle overlay ── */
+  .particle-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  /* ── Video overlay ── */
+  .video-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Slide transitions ── */
+  .trans-fade-out {
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .trans-fade-in {
+    opacity: 1;
+    transition: opacity 0.5s ease;
+  }
+
+  .trans-slide-out {
+    transform: translateX(-100%);
+    transition: transform 0.2s ease-in;
+  }
+  .trans-slide-in {
+    transform: translateX(0);
+    transition: transform 0.4s ease-out;
+  }
+
+  .trans-zoom-out {
+    transform: scale(1.05);
+    opacity: 0;
+    transition: all 0.25s ease;
+  }
+  .trans-zoom-in {
+    transform: scale(1);
+    opacity: 1;
+    transition: all 0.5s ease;
+  }
+
+  .trans-diamond-out {
+    clip-path: polygon(50% 50%, 50% 50%, 50% 50%, 50% 50%);
+    transition: clip-path 0.4s ease-in;
+  }
+  .trans-diamond-in {
+    clip-path: polygon(50% -50%, 150% 50%, 50% 150%, -50% 50%);
+    transition: clip-path 0.8s ease-out;
   }
 
   /* ── Slide counter ── */

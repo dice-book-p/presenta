@@ -7,6 +7,7 @@
  */
 import { WebSocketServer } from 'ws';
 import { getProject, isProjectActive, getActiveProjects } from '../store/projects.js';
+import { getMediaItem } from '../store/media.js';
 import { WS_HEARTBEAT_MS } from '../config.js';
 import {
   registerMainDisplay,
@@ -22,6 +23,31 @@ import {
   broadcastToDisplays,
   sendToRemotes,
 } from './connections.js';
+
+function resolveMediaUrls(project) {
+  const urls = {};
+  const se = project?.signEffect;
+  if (!se || se.theme === 'none') return urls;
+  if (se.bgmId) {
+    const m = getMediaItem(se.bgmId);
+    if (m) urls.bgmUrl = m.url;
+  }
+  if (se.completeSoundId) {
+    const m = getMediaItem(se.completeSoundId);
+    if (m) urls.completeSoundUrl = m.url;
+  }
+  if (se.mode === 'video' && project.signatories) {
+    const videoMap = {};
+    for (const s of project.signatories) {
+      if (s.videoId) {
+        const m = getMediaItem(s.videoId);
+        if (m) videoMap[s.id] = m.url;
+      }
+    }
+    if (Object.keys(videoMap).length) urls.signatoryVideos = videoMap;
+  }
+  return urls;
+}
 
 export function createWebSocketServer(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -103,6 +129,7 @@ export function createWebSocketServer(server) {
             role: ws.role,
             connId: ws.connId,
             project,
+            mediaUrls: resolveMediaUrls(project),
             connectionStatus: getConnectionStatus(projectId),
           }));
           break;

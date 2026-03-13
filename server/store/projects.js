@@ -38,6 +38,7 @@ export async function initProjectsStore() {
     for (const p of store.projects) {
       if (!p.slideshow) { p.slideshow = { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false }; migrated = true; }
       if (p.slideshow && p.slideshow.showSlideNumber === undefined) { p.slideshow.showSlideNumber = false; migrated = true; }
+      if (!p.signEffect) { p.signEffect = defaultSignEffect(); migrated = true; }
       for (const s of (p.slides ?? [])) {
         if (s.url && /^https?:\/\/[^/]+\/uploads\//.test(s.url)) {
           s.url = s.url.replace(/^https?:\/\/[^/]+/, '');
@@ -68,6 +69,29 @@ function persist() {
   saveData('projects.json', store).catch(e =>
     console.error('[projects] persist error:', e.message)
   );
+}
+
+function defaultSignEffect() {
+  return {
+    theme: 'none',
+    mode: 'realtime',
+    bgmId: null,
+    bgmMode: 'continuous',
+    completeSoundId: null,
+    completeSoundVolume: 80,
+    penParticle: true,
+    penColor: '#c9a84c',
+    penSize: 'medium',
+    penDensity: 'normal',
+    ambientParticle: true,
+    ambientColor: '#c9a84c',
+    ambientDensity: 'low',
+    sealEffect: true,
+    sealColor: '#c9a84c',
+    sealDuration: 6,
+    transition: 'diamond',
+    autoAdvance: false,
+  };
 }
 
 // ── Active projects ───────────────────────────────────────────────────────────
@@ -130,6 +154,7 @@ export function createProject(name) {
     pin: '',
     remoteToken: '',
     slideshow: { loop: false, autoPlay: false, autoPlaySec: 5, showSlideNumber: false },
+    signEffect: defaultSignEffect(),
   };
   store.projects.push(project);
   persist();
@@ -139,7 +164,7 @@ export function createProject(name) {
 export function updateProject(id, updates) {
   const project = getProject(id);
   if (!project) return null;
-  for (const key of ['name', 'summarySlideId', 'signatories', 'slides', 'pin', 'slideshow']) {
+  for (const key of ['name', 'summarySlideId', 'signatories', 'slides', 'pin', 'slideshow', 'signEffect']) {
     if (key in updates) project[key] = updates[key];
   }
   persist();
@@ -231,6 +256,7 @@ export function updateSignatories(projectId, signatories) {
     slideId:     s.slideId     || null,
     canvasArea:  s.canvasArea  || null,
     summaryArea: s.summaryArea || null,
+    videoId:     s.videoId     || null,
   }));
   persist();
   return project.signatories;

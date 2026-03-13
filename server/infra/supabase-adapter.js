@@ -46,6 +46,28 @@ export async function deleteProjectImages(projectId) {
   }
 }
 
+// ── Media files (Supabase Storage — media bucket) ────────────────────────────
+
+const MEDIA_BUCKET = 'media';
+
+export async function uploadMediaFile(originalFilename, buffer, contentType) {
+  const ext = originalFilename.split('.').pop().toLowerCase() || 'bin';
+  const filename = `${randomUUID()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .upload(filename, buffer, { contentType, upsert: false });
+
+  if (error) throw new Error(error.message);
+
+  const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(filename);
+  return { filename, url: data.publicUrl };
+}
+
+export async function deleteMediaFile(filename) {
+  await supabase.storage.from(MEDIA_BUCKET).remove([filename]);
+}
+
 // ── Data: loadData (DB → 인메모리 JSON 구조로 변환) ──────────────────────────
 
 export async function loadData(filename) {
@@ -92,6 +114,7 @@ async function loadProjectsFromDB() {
       slideId: s.slide_id,
       canvasArea: s.canvas_area,
       summaryArea: s.summary_area,
+      videoId: s.video_id ?? null,
     });
   }
 
@@ -105,6 +128,7 @@ async function loadProjectsFromDB() {
       pin: p.pin ?? '',
       remoteToken: p.remote_token ?? '',
       slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
+      signEffect: p.sign_effect ?? null,
       slides: slidesMap[p.id] ?? [],
       signatories: sigMap[p.id] ?? [],
     })),
@@ -154,6 +178,7 @@ async function saveProjectsToDB(store) {
         pin: p.pin ?? '',
         remote_token: p.remoteToken ?? '',
         slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
+        sign_effect: p.signEffect ?? null,
       }))
     );
   }
@@ -190,6 +215,7 @@ async function saveProjectsToDB(store) {
           slide_id: s.slideId ?? null,
           canvas_area: s.canvasArea ?? null,
           summary_area: s.summaryArea ?? null,
+          video_id: s.videoId ?? null,
         }))
       );
     }
