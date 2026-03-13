@@ -119,6 +119,7 @@ async function loadProjectsFromDB() {
       canvasArea: s.canvas_area,
       displaySlides,
       videoId: s.video_id ?? null,
+      bgmId: s.bgm_id ?? null,
     });
   }
 
@@ -132,6 +133,7 @@ async function loadProjectsFromDB() {
       remoteToken: p.remote_token ?? '',
       slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
       signEffect: p.sign_effect ?? null,
+      videos: Array.isArray(p.videos) ? p.videos : [],
       slides: slidesMap[p.id] ?? [],
       signatories: sigMap[p.id] ?? [],
     })),
@@ -197,6 +199,7 @@ async function saveProjectsToDB(store) {
         remote_token: p.remoteToken ?? '',
         slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
         sign_effect: p.signEffect ?? null,
+        videos: p.videos ?? [],
       }))
     );
   }
@@ -234,6 +237,7 @@ async function saveProjectsToDB(store) {
           canvas_area: s.canvasArea ?? null,
           display_slides: s.displaySlides ?? [],
           video_id: s.videoId ?? null,
+          bgm_id: s.bgmId ?? null,
         }))
       );
     }
