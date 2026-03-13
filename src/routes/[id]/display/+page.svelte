@@ -671,6 +671,22 @@
       clearCanvas(msg.signId);
     }));
 
+    // 관리자 서명 초기화 → frozenFrames + 캔버스 클리어
+    unsubs.push(wsStore.on('signatures_cleared', (msg) => {
+      if (msg.signId === null) {
+        // 전체 초기화
+        frozenFrames = {};
+        playingVideo = null;
+        for (const signId of Object.keys(canvasRefs)) clearCanvas(signId);
+      } else {
+        // 개별 초기화
+        const { [msg.signId]: _removed, ...rest } = frozenFrames;
+        frozenFrames = rest;
+        if (playingVideo) playingVideo = null;
+        clearCanvas(msg.signId);
+      }
+    }));
+
     unsubs.push(wsStore.on('remote_slide', (msg) => {
       if (msg.direction === 'next') goToSlide(currentSlide + 1);
       else if (msg.direction === 'prev') goToSlide(currentSlide - 1);

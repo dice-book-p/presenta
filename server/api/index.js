@@ -20,7 +20,7 @@ import {
 } from '../store/signatures.js';
 import {
   getConnectionStatus, forceDisconnect, forceDisconnectAll,
-  broadcastAll, broadcastActiveChanged,
+  broadcastAll, broadcastActiveChanged, sendToMain,
 } from '../ws/connections.js';
 import {
   uploadSlideImage, deleteSlideImage, deleteProjectImages,
@@ -229,11 +229,15 @@ async function saveSignatureHandler({ req, res, params }) {
 
 async function clearSignaturesHandler({ res, params }) {
   clearSignatures(params.id);
+  // display에 전체 초기화 알림
+  sendToMain(params.id, { type: 'signatures_cleared', signId: null });
   json(res, 200, { ok: true });
 }
 
 async function clearOneSignatureHandler({ res, params }) {
   clearOneSignature(params.id, params.signId);
+  // display에 개별 초기화 알림
+  sendToMain(params.id, { type: 'signatures_cleared', signId: params.signId });
   json(res, 200, { ok: true });
 }
 
