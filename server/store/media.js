@@ -1,5 +1,5 @@
 /**
- * 미디어 라이브러리 인메모리 스토어 (data/media.json 기반)
+ * 미디어 라이브러리 인메모리 스토어 (Supabase: media 테이블 / 로컬: data/media.json)
  *
  * MediaItem { id, type: 'audio'|'video', filename, originalFilename, url, mimeType, size, createdAt }
  */

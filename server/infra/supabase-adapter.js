@@ -2,7 +2,8 @@
  * Supabase 어댑터 (인프라 레이어)
  *
  * - 이미지: Supabase Storage (slides 버킷)
- * - 데이터: Supabase PostgreSQL DB (projects, slides, signatories, active_projects, signatures 테이블)
+ * - 미디어: Supabase Storage (media 버킷)
+ * - 데이터: Supabase PostgreSQL DB (projects, slides, signatories, active_projects, signatures, media 테이블)
  *
  * store/ 레이어와 동일한 loadData/saveData 인터페이스를 유지한다.
  */
@@ -73,6 +74,7 @@ export async function deleteMediaFile(filename) {
 export async function loadData(filename) {
   if (filename === 'projects.json') return loadProjectsFromDB();
   if (filename === 'signatures.json') return loadSignaturesFromDB();
+  if (filename === 'media.json') return loadMediaFromDB();
   return null;
 }
 
@@ -146,11 +148,27 @@ async function loadSignaturesFromDB() {
   return result;
 }
 
+async function loadMediaFromDB() {
+  const { data } = await supabase.from('media').select('*').order('created_at');
+  if (!data) return [];
+  return data.map(m => ({
+    id: m.id,
+    type: m.type,
+    filename: m.filename,
+    originalFilename: m.original_filename,
+    url: m.url,
+    mimeType: m.mime_type,
+    size: m.size ?? 0,
+    createdAt: m.created_at,
+  }));
+}
+
 // ── Data: saveData (인메모리 JSON → DB 동기화) ───────────────────────────────
 
 export async function saveData(filename, obj) {
   if (filename === 'projects.json') return saveProjectsToDB(obj);
   if (filename === 'signatures.json') return saveSignaturesToDB(obj);
+  if (filename === 'media.json') return saveMediaToDB(obj);
 }
 
 async function saveProjectsToDB(store) {
@@ -245,6 +263,27 @@ async function saveSignaturesToDB(store) {
     // Supabase insert 1000행 제한 → 배치 분할
     for (let i = 0; i < rows.length; i += 500) {
       await supabase.from('signatures').insert(rows.slice(i, i + 500));
+    }
+  }
+}
+
+async function saveMediaToDB(items) {
+  // 전체 삭제 후 재삽입
+  await supabase.from('media').delete().not('id', 'is', null);
+
+  if (items.length) {
+    const rows = items.map(m => ({
+      id: m.id,
+      type: m.type,
+      filename: m.filename,
+      original_filename: m.originalFilename ?? null,
+      url: m.url,
+      mime_type: m.mimeType ?? null,
+      size: m.size ?? 0,
+      created_at: m.createdAt,
+    }));
+    for (let i = 0; i < rows.length; i += 500) {
+      await supabase.from('media').insert(rows.slice(i, i + 500));
     }
   }
 }
