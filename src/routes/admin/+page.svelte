@@ -1269,7 +1269,7 @@
   // ── Project videos ──────────────────────────────────────────────────────────
   let projectVideos = $state([]);
   let videoUploading = $state(false);
-  let videoUploadInput = $state(null);
+  let sigVideoUploadInput = $state(null); // 서명자 폼 내 업로드 input
 
   async function loadProjectVideos(pid) {
     if (!pid) { projectVideos = []; return; }
@@ -1279,8 +1279,12 @@
     } catch { projectVideos = []; }
   }
 
-  async function uploadProjectVideo(file) {
-    if (!selectedProject || !file) return;
+  /**
+   * 영상 업로드 후 signatoryId 지정까지 한번에 처리
+   * signatoryId가 전달되면 업로드 즉시 해당 서명자에 매핑
+   */
+  async function uploadProjectVideo(file, signatoryId = null) {
+    if (!selectedProject || !file) return null;
     videoUploading = true;
     const fd = new FormData();
     fd.append('file', file);
@@ -1293,13 +1297,18 @@
       if (r.ok) {
         const v = await r.json();
         projectVideos = [...projectVideos, v];
+        // 서명자 매핑
+        if (signatoryId) await assignVideoToSignatory(v.id, signatoryId);
         flash('영상이 업로드되었습니다.');
+        videoUploading = false;
+        return v;
       } else {
         const e = await r.json().catch(() => ({}));
         flash('', e.error || '업로드 실패');
       }
     } catch { flash('', '업로드 중 오류'); }
     videoUploading = false;
+    return null;
   }
 
   async function deleteProjectVideoItem(videoId) {
@@ -1310,6 +1319,8 @@
       });
       if (r.ok) {
         projectVideos = projectVideos.filter(v => v.id !== videoId);
+        // 서명자 videoId도 로컬 반영
+        if (editSig?.videoId === videoId) editSig = { ...editSig, videoId: null };
         flash('영상이 삭제되었습니다.');
       }
     } catch { flash('', '삭제 중 오류'); }
@@ -1969,17 +1980,54 @@
                 {#if currentSignEffect.mode === 'video'}
                   <div class="form-section-label">서명 영상</div>
                   <div class="form-group">
-                    <label class="field-label">서명 완료 시 재생할 영상</label>
-                    <select class="text-input" value={editSig.videoId ?? ''}
-                      onchange={e => editSig = { ...editSig, videoId: e.target.value || null }}>
-                      <option value="">없음</option>
-                      {#each projectVideos as v}
-                        <option value={v.id}>{v.originalFilename}</option>
-                      {/each}
-                    </select>
-                    {#if projectVideos.length === 0}
-                      <p class="helper-text" style="color:rgba(232,160,80,.7)">설정 탭에서 프로젝트 영상을 먼저 업로드하세요.</p>
+                    {#if editSig.videoId}
+                      {@const assignedVideo = projectVideos.find(v => v.id === editSig.videoId)}
+                      <div style="display:flex;align-items:center;gap:8px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.25);border-radius:8px;padding:10px 12px">
+                        <span style="flex:1;font-size:13px;color:#e8e0d0;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                          {assignedVideo?.originalFilename ?? '(삭제된 영상)'}
+                        </span>
+                        <button class="btn-ghost btn-xs" style="color:#e07070;flex-shrink:0"
+                          onclick={() => { editSig = { ...editSig, videoId: null }; assignVideoToSignatory('', editSig.id).catch(()=>{}); }}>
+                          제거
+                        </button>
+                      </div>
+                      <p class="helper-text" style="margin-top:6px">서명 완료 시 이 영상이 풀스크린으로 재생됩니다.</p>
+                    {:else}
+                      <p style="font-size:13px;color:rgba(232,224,208,.4);margin-bottom:8px">지정된 영상 없음</p>
                     {/if}
+
+                    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+                      <!-- 새 영상 업로드 -->
+                      <label class="btn-outline btn-sm" style="cursor:pointer">
+                        {#if videoUploading}업로드 중...{:else}새 영상 업로드{/if}
+                        <input bind:this={sigVideoUploadInput} type="file" accept="video/*,.webm,.mp4"
+                          style="display:none" disabled={videoUploading}
+                          onchange={async e => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            e.target.value = '';
+                            const v = await uploadProjectVideo(f, editSig.id);
+                            if (v) editSig = { ...editSig, videoId: v.id };
+                          }} />
+                      </label>
+
+                      <!-- 기존 영상에서 선택 -->
+                      {#if projectVideos.length > 0}
+                        <select class="select-input select-input-inline" style="font-size:12px"
+                          value={editSig.videoId ?? ''}
+                          onchange={async e => {
+                            const vid = e.target.value || null;
+                            editSig = { ...editSig, videoId: vid };
+                            if (vid) await assignVideoToSignatory(vid, editSig.id);
+                          }}>
+                          <option value="">기존 영상 선택...</option>
+                          {#each projectVideos as v}
+                            <option value={v.id}>{v.originalFilename}</option>
+                          {/each}
+                        </select>
+                      {/if}
+                    </div>
+                    <p class="helper-text" style="margin-top:6px">WebM 권장 (최대 20MB)</p>
                   </div>
                 {/if}
 
@@ -2600,48 +2648,9 @@
               {#if currentSignEffect.mode === 'video'}
                 <div style="margin-top:16px;padding:14px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid rgba(255,255,255,.06)">
                   <p class="helper-text" style="margin:0;color:rgba(232,224,208,.6)">
-                    영상 모드에서는 서명 완료 시 서명자별 지정 영상이 풀스크린 재생됩니다.<br>
-                    영상에 포함된 오디오가 그대로 출력되므로 별도 BGM 설정은 불필요합니다.<br><br>
-                    <strong>서명자 탭</strong>에서 각 서명자를 편집하여 영상을 지정하세요.
-                  </p>
-                </div>
-
-                <!-- 영상 관리 (video 모드) -->
-                <div class="form-group" style="margin-top:16px">
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                    <label class="field-label">서명 영상 관리</label>
-                    <label class="btn-outline btn-sm" style="cursor:pointer">
-                      {#if videoUploading}업로드 중...{:else}영상 추가{/if}
-                      <input bind:this={videoUploadInput} type="file" accept="video/*,.webm,.mp4"
-                        style="display:none" disabled={videoUploading}
-                        onchange={e => { const f = e.target.files?.[0]; if (f) uploadProjectVideo(f); e.target.value=''; }} />
-                    </label>
-                  </div>
-                  {#if projectVideos.length === 0}
-                    <p style="font-size:12px;color:rgba(232,224,208,.4);padding:12px 0">
-                      등록된 영상이 없습니다. "영상 추가"로 업로드하세요. (WebM 권장, 최대 20MB)
-                    </p>
-                  {:else}
-                    <div style="display:flex;flex-direction:column;gap:6px">
-                      {#each projectVideos as v}
-                        <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 10px">
-                          <span style="flex:1;font-size:12px;color:rgba(232,224,208,.8);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{v.originalFilename}</span>
-                          <select class="select-input" style="max-width:160px;font-size:12px;padding:4px 8px"
-                            value={v.signatoryId ?? ''}
-                            onchange={e => assignVideoToSignatory(v.id, e.target.value || null)}>
-                            <option value="">서명자 미지정</option>
-                            {#each (selectedProject?.signatories ?? []) as sig}
-                              <option value={sig.id}>{sig.name || sig.title || `서명자 ${sig.order}`}</option>
-                            {/each}
-                          </select>
-                          <button class="btn-ghost btn-xs" style="color:#e07070"
-                            onclick={() => deleteProjectVideoItem(v.id)}>삭제</button>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                  <p style="font-size:11px;color:rgba(232,224,208,.35);margin-top:6px">
-                    WebM 권장 (최대 20MB). 서명자별로 재생할 영상을 지정하세요.
+                    서명 완료 시 서명자별 지정 영상이 풀스크린으로 재생됩니다.<br>
+                    영상에 포함된 오디오가 그대로 출력되므로 별도 BGM은 불필요합니다.<br><br>
+                    <strong>서명자 탭</strong>에서 각 서명자를 편집하여 영상을 업로드·지정하세요.
                   </p>
                 </div>
               {/if}
