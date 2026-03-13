@@ -332,7 +332,20 @@ export function updateProjectVideoSignatory(projectId, videoId, signatoryId) {
   if (!project?.videos) return null;
   const video = project.videos.find(v => v.id === videoId);
   if (!video) return null;
+
+  const oldSignatoryId = video.signatoryId;
   video.signatoryId = signatoryId ?? null;
+
+  // 서명자의 videoId도 동기화
+  if (oldSignatoryId && oldSignatoryId !== signatoryId) {
+    const oldSig = project.signatories?.find(s => s.id === oldSignatoryId);
+    if (oldSig && oldSig.videoId === videoId) oldSig.videoId = null;
+  }
+  if (signatoryId) {
+    const newSig = project.signatories?.find(s => s.id === signatoryId);
+    if (newSig) newSig.videoId = videoId;
+  }
+
   persist();
   return video;
 }
