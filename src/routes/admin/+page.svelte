@@ -2031,7 +2031,22 @@
                   </div>
                 {/if}
 
-                <!-- 위치 설정 (영상 모드에서는 불필요) -->
+                <!-- 슬라이드 선택 (영상 모드) -->
+                {#if currentSignEffect.mode === 'video'}
+                  <div class="form-section-label">슬라이드 설정</div>
+                  <div class="form-group">
+                    <label class="field-label">서명자가 매핑되는 슬라이드</label>
+                    <select class="select-input" bind:value={editSig.slideId}>
+                      <option value={null}>미지정</option>
+                      {#each sorted(selectedProject.slides) as s}
+                        <option value={s.id}>슬라이드 {s.order + 1}</option>
+                      {/each}
+                    </select>
+                    <p class="helper-text">해당 슬라이드로 이동 시 서명이 활성화됩니다.</p>
+                  </div>
+                {/if}
+
+                <!-- 위치 설정 (실시간 모드 전용) -->
                 {#if currentSignEffect.mode !== 'video'}
                 <div class="form-section-label">위치 설정</div>
 
