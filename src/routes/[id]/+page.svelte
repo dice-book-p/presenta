@@ -15,6 +15,7 @@
   let pinError = $state('');
   let notFound = $state(false);
   let signQr = $state('');
+  let generatingQR = $state(false);
 
   /** PIN 인증된 프로젝트 ID 목록을 sessionStorage에서 관리 */
   function isPinVerified(id) {
@@ -50,6 +51,7 @@
 
     // 서명 페이지 QR 생성
     if (project) {
+      generatingQR = true;
       try {
         const QRCode = await import('qrcode');
         const signUrl = `${window.location.origin}/${projectId}/sign`;
@@ -57,6 +59,7 @@
           width: 160, margin: 1, color: { dark: '#c9a84c', light: '#0d0d14' }
         });
       } catch {}
+      generatingQR = false;
     }
   });
 
@@ -129,7 +132,11 @@
         </div>
 
         <!-- 서명 QR: PC에서만 표시 -->
-        {#if signQr}
+        {#if generatingQR}
+          <div class="qr-section">
+            <p class="qr-label">QR 생성 중...</p>
+          </div>
+        {:else if signQr}
           <div class="qr-section">
             <div class="qr-divider"></div>
             <p class="qr-label">📱 태블릿 서명 접속</p>

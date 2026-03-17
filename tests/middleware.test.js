@@ -4,7 +4,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { match, checkAuth } from '../server/api/middleware.js';
+import { Readable } from 'node:stream';
+import { match, checkAuth, readBody } from '../server/api/middleware.js';
 
 describe('match()', () => {
   it('정적 경로 일치', () => {
@@ -53,5 +54,53 @@ describe('checkAuth()', () => {
 
   it('공백 트림 처리', () => {
     assert.equal(checkAuth(makeReq('Bearer  1234 '), '1234'), true);
+  });
+});
+
+describe('readBody()', () => {
+  function fakeReq(body) {
+    const stream = new Readable({ read() {} });
+    setTimeout(() => {
+      stream.push(typeof body === 'string' ? body : JSON.stringify(body));
+      stream.push(null);
+    }, 0);
+    return stream;
+  }
+
+  it('정상 JSON 파싱', async () => {
+    const result = await readBody(fakeReq({ name: 'test' }));
+    assert.deepEqual(result, { name: 'test' });
+  });
+
+  it('빈 본문 → 빈 객체', async () => {
+    const stream = new Readable({ read() {} });
+    setTimeout(() => stream.push(null), 0);
+    const result = await readBody(stream);
+    assert.deepEqual(result, {});
+  });
+
+  it('잘못된 JSON → 빈 객체', async () => {
+    const result = await readBody(fakeReq('not json'));
+    assert.deepEqual(result, {});
+  });
+
+  it('1MB 초과 시 BODY_TOO_LARGE 에러', async () => {
+    const stream = new Readable({ read() {} });
+    setTimeout(() => {
+      // 1MB + 1 byte
+      const big = Buffer.alloc(1024 * 1024 + 1, 'a');
+      stream.push(big);
+      stream.push(null);
+    }, 0);
+    await assert.rejects(() => readBody(stream), { message: 'BODY_TOO_LARGE' });
+  });
+
+  it('maxBytes 파라미터로 제한 크기 변경', async () => {
+    const stream = new Readable({ read() {} });
+    setTimeout(() => {
+      stream.push(Buffer.alloc(200, 'a'));
+      stream.push(null);
+    }, 0);
+    await assert.rejects(() => readBody(stream, 100), { message: 'BODY_TOO_LARGE' });
   });
 });

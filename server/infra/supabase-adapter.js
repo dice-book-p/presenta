@@ -178,77 +178,97 @@ async function saveProjectsToDB(store) {
   const { activeProjectIds = [], projects = [] } = store;
 
   // 1. 현재 DB에 있는 프로젝트 ID 조회
-  const { data: existing } = await supabase.from('projects').select('id');
-  const existingIds = new Set((existing ?? []).map(p => p.id));
-  const currentIds = new Set(projects.map(p => p.id));
+  try {
+    const { data: existing } = await supabase.from('projects').select('id');
+    const existingIds = new Set((existing ?? []).map(p => p.id));
+    const currentIds = new Set(projects.map(p => p.id));
 
-  // 2. 삭제된 프로젝트 제거 (CASCADE로 slides/signatories도 삭제)
-  const toDelete = [...existingIds].filter(id => !currentIds.has(id));
-  if (toDelete.length) {
-    await supabase.from('projects').delete().in('id', toDelete);
+    // 2. 삭제된 프로젝트 제거 (CASCADE로 slides/signatories도 삭제)
+    const toDelete = [...existingIds].filter(id => !currentIds.has(id));
+    if (toDelete.length) {
+      await supabase.from('projects').delete().in('id', toDelete);
+    }
+  } catch (e) {
+    console.error('[supabase] save error (delete projects):', e.message);
   }
 
   // 3. 프로젝트 upsert
-  if (projects.length) {
-    await supabase.from('projects').upsert(
-      projects.map(p => ({
-        id: p.id,
-        name: p.name,
-        created_at: p.createdAt,
-        pin: p.pin ?? '',
-        remote_token: p.remoteToken ?? '',
-        slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
-        sign_effect: p.signEffect ?? null,
-        videos: p.videos ?? [],
-      }))
-    );
+  try {
+    if (projects.length) {
+      await supabase.from('projects').upsert(
+        projects.map(p => ({
+          id: p.id,
+          name: p.name,
+          created_at: p.createdAt,
+          pin: p.pin ?? '',
+          remote_token: p.remoteToken ?? '',
+          slideshow: p.slideshow ?? { loop: false, autoPlay: false, autoPlaySec: 5 },
+          sign_effect: p.signEffect ?? null,
+          videos: p.videos ?? [],
+        }))
+      );
+    }
+  } catch (e) {
+    console.error('[supabase] save error (upsert projects):', e.message);
   }
 
   // 4. 슬라이드 동기화 (프로젝트별 delete + insert)
   for (const p of projects) {
-    await supabase.from('slides').delete().eq('project_id', p.id);
-    if (p.slides?.length) {
-      await supabase.from('slides').insert(
-        p.slides.map(s => ({
-          id: s.id,
-          project_id: p.id,
-          sort_order: s.order,
-          filename: s.filename,
-          url: s.url,
-          original_filename: s.originalFilename ?? null,
-        }))
-      );
+    try {
+      await supabase.from('slides').delete().eq('project_id', p.id);
+      if (p.slides?.length) {
+        await supabase.from('slides').insert(
+          p.slides.map(s => ({
+            id: s.id,
+            project_id: p.id,
+            sort_order: s.order,
+            filename: s.filename,
+            url: s.url,
+            original_filename: s.originalFilename ?? null,
+          }))
+        );
+      }
+    } catch (e) {
+      console.error('[supabase] save error (slides for', p.id, '):', e.message);
     }
   }
 
   // 5. 서명자 동기화 (프로젝트별 delete + insert)
   for (const p of projects) {
-    await supabase.from('signatories').delete().eq('project_id', p.id);
-    if (p.signatories?.length) {
-      await supabase.from('signatories').insert(
-        p.signatories.map(s => ({
-          id: s.id,
-          project_id: p.id,
-          sort_order: s.order,
-          title: s.title ?? '',
-          name: s.name ?? '',
-          color: s.color ?? '#ffffff',
-          slide_id: s.slideId ?? null,
-          canvas_area: s.canvasArea ?? null,
-          display_slides: s.displaySlides ?? [],
-          video_id: s.videoId ?? null,
-          bgm_id: s.bgmId ?? null,
-        }))
-      );
+    try {
+      await supabase.from('signatories').delete().eq('project_id', p.id);
+      if (p.signatories?.length) {
+        await supabase.from('signatories').insert(
+          p.signatories.map(s => ({
+            id: s.id,
+            project_id: p.id,
+            sort_order: s.order,
+            title: s.title ?? '',
+            name: s.name ?? '',
+            color: s.color ?? '#ffffff',
+            slide_id: s.slideId ?? null,
+            canvas_area: s.canvasArea ?? null,
+            display_slides: s.displaySlides ?? [],
+            video_id: s.videoId ?? null,
+            bgm_id: s.bgmId ?? null,
+          }))
+        );
+      }
+    } catch (e) {
+      console.error('[supabase] save error (signatories for', p.id, '):', e.message);
     }
   }
 
   // 6. 활성 프로젝트 동기화
-  await supabase.from('active_projects').delete().not('project_id', 'is', null);
-  if (activeProjectIds.length) {
-    await supabase.from('active_projects').insert(
-      activeProjectIds.map(id => ({ project_id: id }))
-    );
+  try {
+    await supabase.from('active_projects').delete().not('project_id', 'is', null);
+    if (activeProjectIds.length) {
+      await supabase.from('active_projects').insert(
+        activeProjectIds.map(id => ({ project_id: id }))
+      );
+    }
+  } catch (e) {
+    console.error('[supabase] save error (active projects):', e.message);
   }
 }
 

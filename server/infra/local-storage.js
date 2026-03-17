@@ -45,12 +45,16 @@ export async function uploadSlideImage(projectId, originalFilename, buffer, cont
 
 export async function deleteSlideImage(projectId, filename) {
   const filepath = join(UPLOAD_DIR, projectId, filename);
-  if (existsSync(filepath)) await unlink(filepath).catch(() => {});
+  if (existsSync(filepath)) await unlink(filepath).catch(e =>
+    console.error('[local-storage] delete error:', e.message)
+  );
 }
 
 export async function deleteProjectImages(projectId) {
   const dir = join(UPLOAD_DIR, projectId);
-  if (existsSync(dir)) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  if (existsSync(dir)) await rm(dir, { recursive: true, force: true }).catch(e =>
+    console.error('[local-storage] delete error:', e.message)
+  );
 }
 
 // ── Media files ──────────────────────────────────────────────────────────
@@ -67,7 +71,9 @@ export async function uploadMediaFile(originalFilename, buffer, contentType) {
 
 export async function deleteMediaFile(filename) {
   const filepath = join(UPLOAD_DIR, 'media', filename);
-  if (existsSync(filepath)) await unlink(filepath).catch(() => {});
+  if (existsSync(filepath)) await unlink(filepath).catch(e =>
+    console.error('[local-storage] delete error:', e.message)
+  );
 }
 
 // ── Data files ────────────────────────────────────────────────────────────────

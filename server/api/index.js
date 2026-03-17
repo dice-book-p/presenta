@@ -20,7 +20,7 @@ import {
 } from '../store/signatures.js';
 import {
   getConnectionStatus, forceDisconnect, forceDisconnectAll,
-  broadcastAll, broadcastActiveChanged, sendToMain,
+  broadcastAll, broadcastActiveChanged, sendToMain, deletePool,
 } from '../ws/connections.js';
 import {
   uploadSlideImage, deleteSlideImage, deleteProjectImages,
@@ -34,6 +34,36 @@ import {
   ALLOWED_AUDIO_TYPES, ALLOWED_VIDEO_TYPES,
 } from '../config.js';
 import { checkAuth, json, readBody, match, unauth, notFound } from './middleware.js';
+
+// ── PIN rate limit ───────────────────────────────────────────────────────────
+const pinAttempts = new Map(); // ip → { count, lockedUntil }
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MS = 60_000;
+
+function checkPinRateLimit(ip) {
+  const now = Date.now();
+  // sweep expired entries
+  for (const [key, val] of pinAttempts) {
+    if (val.lockedUntil && now > val.lockedUntil) pinAttempts.delete(key);
+  }
+  const entry = pinAttempts.get(ip);
+  if (entry?.lockedUntil && now < entry.lockedUntil) return false;
+  return true;
+}
+
+function recordPinFailure(ip) {
+  const entry = pinAttempts.get(ip) ?? { count: 0, lockedUntil: null };
+  entry.count += 1;
+  if (entry.count >= PIN_MAX_ATTEMPTS) {
+    entry.lockedUntil = Date.now() + PIN_LOCK_MS;
+    entry.count = 0;
+  }
+  pinAttempts.set(ip, entry);
+}
+
+function clearPinAttempts(ip) {
+  pinAttempts.delete(ip);
+}
 
 // ── Active projects ───────────────────────────────────────────────────────────
 
@@ -107,8 +137,10 @@ async function updateProjectHandler({ req, res, params }) {
 async function deleteProjectHandler({ res, params }) {
   if (!getProject(params.id)) { notFound(res); return; }
   deleteProjectImages(params.id).catch(e =>
-    console.error('[api] deleteProjectImages:', e.message)
+    console.error('[storage] delete error:', e.message)
   );
+  clearSignatures(params.id);
+  deletePool(params.id);
   deleteProject(params.id);
   json(res, 200, { ok: true });
 }
@@ -134,10 +166,19 @@ async function verifyPinHandler({ req, res, params }) {
   const project = getProject(params.id);
   if (!project) { notFound(res); return; }
   if (!project.pin) { json(res, 200, { ok: true }); return; }
+
+  const ip = req.socket?.remoteAddress ?? 'unknown';
+  if (!checkPinRateLimit(ip)) {
+    json(res, 429, { ok: false, error: '너무 많은 시도입니다. 잠시 후 다시 시도해주세요' });
+    return;
+  }
+
   const { pin } = await readBody(req);
   if (pin === project.pin) {
+    clearPinAttempts(ip);
     json(res, 200, { ok: true });
   } else {
+    recordPinFailure(ip);
     json(res, 401, { ok: false, error: 'PIN이 올바르지 않습니다' });
   }
 }
@@ -158,7 +199,7 @@ async function uploadSlideHandler({ req, res, params }) {
   let uploaded = null;
   let tooLarge = false;
 
-  await new Promise((resolve) => {
+  await new Promise((resolve, reject) => {
     const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_SLIDE_BYTES }, defParamCharset: 'utf8' });
     busboy.on('file', (_field, stream, info) => {
       const chunks = [];
@@ -171,7 +212,7 @@ async function uploadSlideHandler({ req, res, params }) {
       });
     });
     busboy.on('close', resolve);
-    busboy.on('error', resolve);
+    busboy.on('error', (e) => reject(e));
     req.pipe(busboy);
   });
 
@@ -199,7 +240,9 @@ async function clearAllSlidesHandler({ res, params }) {
   const project = getProject(params.id);
   if (!project) { notFound(res); return; }
   for (const slide of project.slides) {
-    await deleteSlideImage(params.id, slide.filename).catch(() => {});
+    await deleteSlideImage(params.id, slide.filename).catch(e =>
+      console.error('[storage] delete error:', e.message)
+    );
   }
   updateProject(params.id, { slides: [], summarySlideId: null });
   json(res, 200, { ok: true });
@@ -210,7 +253,9 @@ async function deleteSlideHandler({ res, params }) {
   if (!project) { notFound(res); return; }
   const slide = project.slides.find(s => s.id === params.slideId);
   if (!slide) { notFound(res); return; }
-  await deleteSlideImage(params.id, slide.filename).catch(() => {});
+  await deleteSlideImage(params.id, slide.filename).catch(e =>
+    console.error('[storage] delete error:', e.message)
+  );
   removeSlide(params.id, params.slideId);
   json(res, 200, { ok: true });
 }
@@ -278,7 +323,7 @@ async function uploadMediaHandler({ req, res }) {
   let uploaded = null;
   let tooLarge = false;
 
-  await new Promise((resolve) => {
+  await new Promise((resolve, reject) => {
     const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_VIDEO_BYTES }, defParamCharset: 'utf8' });
     busboy.on('file', (_field, stream, info) => {
       const chunks = [];
@@ -291,7 +336,7 @@ async function uploadMediaHandler({ req, res }) {
       });
     });
     busboy.on('close', resolve);
-    busboy.on('error', resolve);
+    busboy.on('error', (e) => reject(e));
     req.pipe(busboy);
   });
 
@@ -352,7 +397,7 @@ async function uploadProjectVideoHandler({ req, res, params }) {
   let uploaded = null;
   let tooLarge = false;
 
-  await new Promise((resolve) => {
+  await new Promise((resolve, reject) => {
     const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_VIDEO_BYTES }, defParamCharset: 'utf8' });
     busboy.on('file', (_field, stream, info) => {
       const chunks = [];
@@ -361,7 +406,7 @@ async function uploadProjectVideoHandler({ req, res, params }) {
       stream.on('end', () => { if (!tooLarge) uploaded = { buffer: Buffer.concat(chunks), filename: info.filename, contentType: info.mimeType }; });
     });
     busboy.on('close', resolve);
-    busboy.on('error', resolve);
+    busboy.on('error', (e) => reject(e));
     req.pipe(busboy);
   });
 
@@ -461,7 +506,17 @@ export async function handleApi(url, req, res, adminPin) {
     const params = match(pattern, url.pathname);
     if (!params) continue;
     if (auth && !checkAuth(req, adminPin)) { unauth(res); return true; }
-    await handler({ req, res, params, url });
+    if (auth) console.log('[audit]', req.method, url.pathname);
+    try {
+      await handler({ req, res, params, url });
+    } catch (e) {
+      if (e.message === 'BODY_TOO_LARGE') {
+        json(res, 413, { error: '요청 본문이 너무 큽니다 (최대 1MB)' });
+      } else {
+        console.error('[api] handler error:', e.message);
+        json(res, 500, { error: 'internal error' });
+      }
+    }
     return true;
   }
 

@@ -27,13 +27,31 @@ export function json(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
-/** 요청 본문 파싱 (JSON) */
-export function readBody(req) {
-  return new Promise(resolve => {
+const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB
+
+/** 요청 본문 파싱 (JSON) — 1MB 초과 시 reject */
+export function readBody(req, maxBytes = MAX_BODY_BYTES) {
+  return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    let size = 0;
+    let rejected = false;
+    req.on('data', chunk => {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        rejected = true;
+        req.resume(); // drain remaining data
+        reject(new Error('BODY_TOO_LARGE'));
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
+      if (rejected) return;
       try { resolve(JSON.parse(body || '{}')); } catch { resolve({}); }
+    });
+    req.on('error', () => {
+      if (!rejected) reject(new Error('REQUEST_ERROR'));
     });
   });
 }

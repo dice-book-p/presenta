@@ -81,7 +81,7 @@ export function createWebSocketServer(server) {
       let msg;
       try { msg = JSON.parse(raw.toString()); } catch { return; }
 
-      switch (msg.type) {
+      try { switch (msg.type) {
 
         // ── 메인 디스플레이 식별 ──────────────────────────────────────────────
         case 'identify_display': {
@@ -250,7 +250,9 @@ export function createWebSocketServer(server) {
         // ── 그리기 (태블릿만) ────────────────────────────────────────────────
         case 'draw': {
           if (ws.role !== 'tablet') return;
-          sendToMain(ws.projectId, { type: 'draw', signId: ws.signId, x: msg.x, y: msg.y, action: msg.action });
+          const { x, y, action } = msg;
+          if (typeof x !== 'number' || typeof y !== 'number' || x < 0 || x > 1 || y < 0 || y > 1) return;
+          sendToMain(ws.projectId, { type: 'draw', signId: ws.signId, x, y, action });
           break;
         }
 
@@ -258,7 +260,12 @@ export function createWebSocketServer(server) {
         case 'draw_batch': {
           if (ws.role !== 'tablet') return;
           if (!Array.isArray(msg.points)) return;
-          sendToMain(ws.projectId, { type: 'draw_batch', signId: ws.signId, points: msg.points });
+          const points = msg.points.slice(0, 200).filter(p =>
+            typeof p.x === 'number' && typeof p.y === 'number' &&
+            p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1
+          );
+          if (!points.length) return;
+          sendToMain(ws.projectId, { type: 'draw_batch', signId: ws.signId, points });
           break;
         }
 
@@ -289,6 +296,9 @@ export function createWebSocketServer(server) {
           break;
         }
       }
+      } catch (e) {
+        console.error('[ws] message error:', e.message);
+      }
     });
 
     ws.on('close', () => {
@@ -298,7 +308,13 @@ export function createWebSocketServer(server) {
       }
     });
 
-    ws.on('error', () => ws.terminate());
+    ws.on('error', () => {
+      if (ws.projectId) {
+        unregisterConnection(ws.projectId, ws);
+        broadcastConnectionStatus(ws.projectId);
+      }
+      ws.terminate();
+    });
   });
 
   // Heartbeat

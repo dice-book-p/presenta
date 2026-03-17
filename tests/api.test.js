@@ -235,3 +235,44 @@ describe('GET /api/me', () => {
     assert.equal(res.statusCode, 401);
   });
 });
+
+// ── PIN rate limit ──────────────────────────────────────────────────────────
+
+describe('PIN rate limit', () => {
+  it('5회 실패 후 429 응답', async () => {
+    const p = createProject('Rate Limit Test');
+    updateProjectPin(p.id, '9999');
+
+    // 5회 실패
+    for (let i = 0; i < 5; i++) {
+      const req = fakeReq('POST', `/api/projects/${p.id}/verify-pin`, { pin: 'wrong' });
+      req.socket = { remoteAddress: '10.0.0.99' };
+      const res = fakeRes();
+      await handleApi(makeUrl(`/api/projects/${p.id}/verify-pin`), req, res, ADMIN_PIN);
+      assert.equal(res.statusCode, 401);
+    }
+
+    // 6번째 → 429
+    const req = fakeReq('POST', `/api/projects/${p.id}/verify-pin`, { pin: 'wrong' });
+    req.socket = { remoteAddress: '10.0.0.99' };
+    const res = fakeRes();
+    await handleApi(makeUrl(`/api/projects/${p.id}/verify-pin`), req, res, ADMIN_PIN);
+    assert.equal(res.statusCode, 429);
+  });
+});
+
+// ── readBody BODY_TOO_LARGE → 413 ──────────────────────────────────────────
+
+describe('BODY_TOO_LARGE → 413', () => {
+  it('거대한 요청 본문 전송 시 413 응답', async () => {
+    const bigBody = 'a'.repeat(2 * 1024 * 1024); // 2MB
+    const req = new Readable({ read() { this.push(bigBody); this.push(null); } });
+    req.method = 'POST';
+    req.headers = { 'content-type': 'application/json', authorization: `Bearer ${ADMIN_PIN}` };
+    req.socket = { remoteAddress: '127.0.0.1' };
+    req.destroy = () => {};
+    const res = fakeRes();
+    await handleApi(makeUrl('/api/projects'), req, res, ADMIN_PIN);
+    assert.equal(res.statusCode, 413);
+  });
+});

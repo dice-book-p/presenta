@@ -34,6 +34,7 @@
   let playingVideo   = $state(null); // blob URL for fullscreen video overlay
   let frozenFrames   = $state({});   // slideIndex → JPEG data URL (마지막 프레임 스냅샷)
   let videoBlobUrls  = {};           // signId → blob URL cache
+  let failedVideos   = new Set();    // signId set for failed video preloads
 
   // slide transition
   let transitionClass = $state('');
@@ -299,10 +300,16 @@
         };
         img.src = dataUrl;
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[display] restoreSignatures failed:', e.message ?? e);
+    }
   }
 
   // ── Slideshow modes ──────────────────────────────────────────────────────
+  const SS_LOOP = 'display_loop';
+  const SS_AUTO = 'display_auto';
+  const SS_AUTO_SEC = 'display_auto_sec';
+
   let loopMode = $state(false);          // 반복 모드
   let autoPlay = $state(false);          // 자동 넘김
   let autoPlayInterval = $state(5);      // 자동 넘김 간격 (초)
@@ -386,7 +393,10 @@
       for (const [signId, url] of Object.entries(mediaUrls.signatoryVideos)) {
         fetch(url).then(r => r.blob()).then(blob => {
           videoBlobUrls[signId] = URL.createObjectURL(blob);
-        }).catch(() => {});
+        }).catch(() => {
+          console.warn('[display] video preload failed:', url);
+          failedVideos.add(signId);
+        });
       }
     }
   }
@@ -399,6 +409,7 @@
       URL.revokeObjectURL(url);
     }
     videoBlobUrls = {};
+    failedVideos.clear();
   }
 
   function handleBgmForSlide(_newIdx, _oldIdx) {
@@ -469,19 +480,41 @@
     handleAmbientForSlide(idx);
   }
 
+  function saveSlideshowModes() {
+    try {
+      sessionStorage.setItem(SS_LOOP, JSON.stringify(loopMode));
+      sessionStorage.setItem(SS_AUTO, JSON.stringify(autoPlay));
+      sessionStorage.setItem(SS_AUTO_SEC, JSON.stringify(autoPlayInterval));
+    } catch {}
+  }
+
+  function restoreSlideshowModes() {
+    try {
+      const l = sessionStorage.getItem(SS_LOOP);
+      const a = sessionStorage.getItem(SS_AUTO);
+      const s = sessionStorage.getItem(SS_AUTO_SEC);
+      if (l !== null) loopMode = JSON.parse(l);
+      if (a !== null) autoPlay = JSON.parse(a);
+      if (s !== null) autoPlayInterval = JSON.parse(s);
+    } catch {}
+  }
+
   function toggleLoop() {
     loopMode = !loopMode;
+    saveSlideshowModes();
   }
 
   function toggleAutoPlay() {
     autoPlay = !autoPlay;
     if (autoPlay) startAutoPlay();
     else stopAutoPlay();
+    saveSlideshowModes();
   }
 
   function setAutoPlayInterval(sec) {
     autoPlayInterval = sec;
     if (autoPlay) { stopAutoPlay(); startAutoPlay(); }
+    saveSlideshowModes();
   }
 
   function startAutoPlay() {
@@ -551,6 +584,8 @@
     autoPlayInterval = Math.max(1, ss.autoPlaySec ?? 5);
     showSlideNumber = !!ss.showSlideNumber;
     slideshowTransition = ss.transition ?? 'none';
+    // sessionStorage에 저장된 값이 있으면 우선 적용
+    restoreSlideshowModes();
   }
 
   onMount(() => {
@@ -574,6 +609,7 @@
         ctxMap = {};  // reset ctx cache on project load
         applySlideshowSettings(msg.project);
         await tick();
+        cleanupEffects(); // 재접속 시 기존 blob URL/이펙트 정리
         initEffects(msg.project, msg.mediaUrls);
         const saved = sessionStorage.getItem(SS_SLIDE);
         // 역할선택 페이지에서 진입 시 플래그가 설정됨 → 새 진입
