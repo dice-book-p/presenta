@@ -21,6 +21,7 @@
 
   // Canvas
   let canvasEl = $state(null);
+  let canvasWrapEl = $state(null);
   let isDrawing = $state(false);
   let lastX = 0;
   let lastY = 0;
@@ -29,6 +30,14 @@
   let drawBatch = [];
   let batchTimer = null;
   const BATCH_INTERVAL = 30;
+
+  // 전체화면
+  let isFullscreen = $state(false);
+
+  // 팜 리젝션
+  let penDetected = false;
+  let penTimeout = null;
+  const PALM_REJECT_DELAY = 500;
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const signatories = $derived(activeProject?.signatories ?? []);
@@ -76,12 +85,62 @@
     errorMsg = '';
     session.save({ signId: sig.id, title: sig.title, name: sig.name, order: sig.order });
     connectAndIdentify();
+    // 사용자 제스처 내에서 전체화면 요청
+    requestFullscreen();
   }
 
   function connectAndIdentify() {
     wsStore.connect();
     view = 'signing';
     signDone = false;
+  }
+
+  // ── Fullscreen ──────────────────────────────────────────────────────────────
+  function requestFullscreen() {
+    document.documentElement.requestFullscreen?.()?.catch?.(() => {});
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.()?.catch?.(() => {});
+    } else {
+      requestFullscreen();
+    }
+  }
+
+  function onFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
+  }
+
+  // ── Canvas resizing ─────────────────────────────────────────────────────────
+  function resizeCanvas() {
+    if (!canvasEl || !canvasWrapEl) return;
+    const rect = canvasWrapEl.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const newW = Math.round(rect.width * dpr);
+    const newH = Math.round(rect.height * dpr);
+    if (canvasEl.width !== newW || canvasEl.height !== newH) {
+      canvasEl.width = newW;
+      canvasEl.height = newH;
+    }
+  }
+
+  function onOrientationChange() {
+    setTimeout(() => {
+      resizeCanvas();
+      if (canvasEl) {
+        canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
+      }
+      if (isDrawing) {
+        isDrawing = false;
+        clearTimeout(batchTimer);
+        batchTimer = null;
+        drawBatch = [];
+      }
+      if (session.data) {
+        retrySend({ type: 'sign_clear', signId: session.data.signId });
+      }
+    }, 100);
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────
@@ -113,8 +172,32 @@
     }, BATCH_INTERVAL);
   }
 
+  /** 선 굵기 계산 — 펜: 필압 기반, 터치/마우스: 속도 기반 */
+  function calcLineWidth(e, px, py) {
+    if (e.pointerType === 'pen' && e.pressure > 0) {
+      return 3 + e.pressure * 13; // 3~16px
+    }
+    const speed = Math.sqrt((px - lastX) ** 2 + (py - lastY) ** 2);
+    return Math.max(5, Math.min(13, 13 - speed * 0.22));
+  }
+
+  /** 팜 리젝션: 펜 감지 시 터치 무시 */
+  function shouldRejectInput(e) {
+    if (e.pointerType === 'pen') {
+      penDetected = true;
+      clearTimeout(penTimeout);
+      penTimeout = null;
+      return false;
+    }
+    if (e.pointerType === 'touch' && penDetected) {
+      return true; // 팜 리젝션 — 터치 무시
+    }
+    return false;
+  }
+
   function onPointerDown(e) {
     if (!isMyTurn || !canvasEl) return;
+    if (shouldRejectInput(e)) return;
     e.preventDefault();
     canvasEl.setPointerCapture(e.pointerId);
     isDrawing = true;
@@ -130,14 +213,13 @@
 
   function onPointerMove(e) {
     if (!isDrawing || !isMyTurn || !canvasEl) return;
+    if (shouldRejectInput(e)) return;
     e.preventDefault();
     const px = e.offsetX * (canvasEl.width  / canvasEl.clientWidth);
     const py = e.offsetY * (canvasEl.height / canvasEl.clientHeight);
     const ctx = getCtx();
     if (ctx) {
-      // 속도 기반 두께 — 빠를수록 얇고 느릴수록 굵어져서 서예 느낌
-      const speed = Math.sqrt((px - lastX) ** 2 + (py - lastY) ** 2);
-      ctx.lineWidth = Math.max(5, Math.min(13, 13 - speed * 0.22));
+      ctx.lineWidth = calcLineWidth(e, px, py);
       // 베지어 곡선 스무딩: 이전 점과 현재 점의 중간을 끝점으로
       const midX = (lastX + px) / 2;
       const midY = (lastY + py) / 2;
@@ -158,6 +240,11 @@
   function onPointerUp(e) {
     if (!isDrawing) return;
     isDrawing = false;
+    // 펜 해제 후 500ms 뒤 팜 리젝션 비활성화
+    if (e.pointerType === 'pen') {
+      clearTimeout(penTimeout);
+      penTimeout = setTimeout(() => { penDetected = false; }, PALM_REJECT_DELAY);
+    }
     // 마지막 점까지 선 마무리
     const ctx = getCtx();
     if (ctx && canvasEl) {
@@ -271,6 +358,15 @@
     }
   });
 
+  // 캔버스 리사이징 — canvasWrapEl이 마운트되면 ResizeObserver 등록
+  $effect(() => {
+    if (!canvasWrapEl) return;
+    resizeCanvas();
+    const observer = new ResizeObserver(() => resizeCanvas());
+    observer.observe(canvasWrapEl);
+    return () => observer.disconnect();
+  });
+
   async function loadSavedSignatures() {
     if (!activeProject) return;
     try {
@@ -310,11 +406,30 @@
       }
     }
 
+    // 전체화면 상태 추적
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    window.addEventListener('orientationchange', onOrientationChange);
+
     return () => {
       teardownHandlers();
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      window.removeEventListener('orientationchange', onOrientationChange);
+      clearTimeout(penTimeout);
     };
   });
 </script>
+
+{#snippet fullscreenIcon()}
+  {#if isFullscreen}
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/>
+    </svg>
+  {:else}
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M8 3H5a2 2 0 00-2 2v3m18-5h-3a2 2 0 00-2 2v3m0 8v3a2 2 0 002 2h3M3 16v3a2 2 0 002 2h3"/>
+    </svg>
+  {/if}
+{/snippet}
 
 <svelte:head>
   <title>서명 — Presenta</title>
@@ -403,6 +518,9 @@
             {#if wsStore.status === 'connected'}연결됨{:else if wsStore.status === 'connecting'}연결 중…{:else}미연결{/if}
           </span>
         </div>
+        <button class="fullscreen-btn" onclick={toggleFullscreen} title={isFullscreen ? '전체화면 해제' : '전체화면'}>
+          {@render fullscreenIcon()}
+        </button>
         <button class="logout-btn" onclick={logout}>나가기</button>
       </div>
     </div>
@@ -429,13 +547,11 @@
       </div>
 
       <!-- 캔버스 (실시간/영상 모드 동일) -->
-      <div class="canvas-wrap">
+      <div class="canvas-wrap" bind:this={canvasWrapEl}>
         <canvas
           bind:this={canvasEl}
           class="sig-canvas"
           class:inactive={!isMyTurn}
-          width="800"
-          height="400"
           onpointerdown={onPointerDown}
           onpointermove={onPointerMove}
           onpointerup={onPointerUp}
@@ -663,6 +779,22 @@
   .ws-dot.connected { background: #4caf50; box-shadow: 0 0 6px rgba(76, 175, 80, 0.5); }
   .ws-label { font-size: 12px; color: rgba(232, 224, 208, 0.5); }
 
+  .fullscreen-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: rgba(232, 224, 208, 0.6);
+    padding: 7px 10px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .fullscreen-btn:hover { background: rgba(255, 255, 255, 0.1); color: #f0e8d8; }
+
   .logout-btn {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -710,7 +842,9 @@
     position: relative;
     width: calc(100% - 40px);
     max-width: 720px;
-    height: 300px;
+    height: 50vh;
+    max-height: 400px;
+    min-height: 200px;
     margin: 24px auto 0;
     border-radius: 14px;
     overflow: hidden;
