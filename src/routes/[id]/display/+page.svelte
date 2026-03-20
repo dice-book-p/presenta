@@ -318,8 +318,9 @@
   let autoPlayTimer = null;
   let boundaryToast = $state('');       // 경계 안내 메시지
   let boundaryToastTimer = null;
-  let showControls = $state(false);     // 컨트롤 바 표시
+  let showControls = $state(false);     // 컨트롤 바 + 화살표 표시
   let controlsTimer = null;
+  let isFullscreen = $state(false);    // 전체화면 상태
   let showExitConfirm = $state(false); // 나가기 확인 다이얼로그
   let showResumePrompt = $state(false); // 이어보기 확인
   let savedSlideIdx = $state(-1);       // 저장된 슬라이드 인덱스
@@ -534,6 +535,15 @@
     controlsTimer = setTimeout(() => { showControls = false; }, 3000);
   }
 
+  function toggleFullscreen() {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    } else {
+      const el = document.documentElement;
+      (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+    }
+  }
+
   function handleKeyDown(e) {
     // 숫자 키 (0-9): 버퍼에 누적, 3초 후 자동 초기화
     if (e.key >= '0' && e.key <= '9') {
@@ -561,7 +571,7 @@
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       e.preventDefault(); goToSlide(currentSlide - 1);
     } else if (e.key === 'f' || e.key === 'F') {
-      document.documentElement.requestFullscreen?.();
+      toggleFullscreen();
     } else if (e.key === 'l' || e.key === 'L') {
       toggleLoop();
     } else if (e.key === 'a' || e.key === 'A') {
@@ -591,6 +601,11 @@
   onMount(() => {
     mounted = true;
     window.addEventListener('keydown', handleKeyDown);
+    const handleFullscreenChange = () => {
+      isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     const handleResize = () => {
       if (particleEngine && particleCanvas) {
         particleEngine.resize(window.innerWidth, window.innerHeight);
@@ -746,6 +761,8 @@
       mounted = false;
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       clearInterval(identifyInterval);
       stopAutoPlay();
       clearTimeout(boundaryToastTimer);
@@ -937,11 +954,13 @@
     <!-- 이전/다음 버튼 -->
     <button
       class="nav-btn nav-prev"
+      class:visible={showControls}
       onclick={() => goToSlide(currentSlide - 1)}
       aria-label="이전 슬라이드"
     >‹</button>
     <button
       class="nav-btn nav-next"
+      class:visible={showControls}
       onclick={() => goToSlide(currentSlide + 1)}
       aria-label="다음 슬라이드"
     >›</button>
@@ -982,6 +1001,22 @@
       {/if}
 
       <div class="ctrl-divider"></div>
+
+      <!-- 전체화면 -->
+      <button class="ctrl-btn" class:active={isFullscreen} onclick={toggleFullscreen} title="전체화면 (F)">
+        {#if isFullscreen}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+            <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        {:else}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        {/if}
+        <span>전체화면</span>
+      </button>
 
       <!-- 나가기 -->
       <button class="ctrl-btn" onclick={() => { showExitConfirm = true; }} title="나가기 (Esc)">
@@ -1193,11 +1228,12 @@
     justify-content: center;
     z-index: 10;
     opacity: 0;
-    transition: opacity 0.2s, color 0.2s;
+    pointer-events: none;
+    transition: opacity 0.3s, color 0.2s;
     cursor: pointer;
   }
 
-  .slideshow:hover .nav-btn { opacity: 1; }
+  .nav-btn.visible { opacity: 1; pointer-events: auto; }
   .nav-btn:hover { color: rgba(232, 224, 208, 0.9); background: rgba(10, 10, 15, 0.75); }
   .nav-prev { left: 16px; }
   .nav-next { right: 16px; }
